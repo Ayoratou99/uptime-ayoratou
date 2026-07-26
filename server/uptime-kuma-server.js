@@ -137,6 +137,12 @@ class UptimeKumaServer {
         UptimeKumaServer.monitorTypeList["oracledb"] = new OracleDbMonitorType();
         UptimeKumaServer.monitorTypeList["ntp"] = new NTPMonitorType();
 
+        // http, keyword and json-query are checked inline in Monitor.beat();
+        // these entries exist so they can advertise condition support to the UI.
+        UptimeKumaServer.monitorTypeList["http"] = new HttpMonitorType();
+        UptimeKumaServer.monitorTypeList["keyword"] = new KeywordMonitorType();
+        UptimeKumaServer.monitorTypeList["json-query"] = new JsonQueryMonitorType();
+
         // Allow all CORS origins (polling) in development
         let cors = undefined;
         if (isDev) {
@@ -597,4 +603,5 @@ const { MssqlMonitorType } = require("./monitor-types/mssql");
 const { MysqlMonitorType } = require("./monitor-types/mysql");
 const { OracleDbMonitorType } = require("./monitor-types/oracledb");
 const { NTPMonitorType } = require("./monitor-types/ntp");
+const { HttpMonitorType, KeywordMonitorType, JsonQueryMonitorType } = require("./monitor-types/http");
 const Monitor = require("./model/monitor");

@@ -51,6 +51,8 @@ const version = require("../../package.json").version;
 const apicache = require("../modules/apicache");
 const { UptimeKumaServer } = require("../uptime-kuma-server");
 const { ROOM_VIEW_ALL_MONITORS } = require("../socket-permissions");
+const { ConditionExpressionGroup } = require("../monitor-conditions/expression");
+const { evaluateExpressionGroup } = require("../monitor-conditions/evaluator");
 const { DockerHost } = require("../docker");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
@@ -732,6 +734,11 @@ class Monitor extends BeanModel {
                             );
                         }
                     }
+
+                    // Applied after the type-specific check so conditions
+                    // compose with the keyword and JSON query rules rather
+                    // than replacing them.
+                    this.checkHttpConditions(res, bean.ping);
                 } else if (this.type === "ping") {
                     bean.ping = await ping(
                         this.hostname,
@@ -1117,6 +1124,83 @@ class Monitor extends BeanModel {
             }, this.interval * 1000);
         } else {
             safeBeat();
+        }
+    }
+
+    /**
+     * Build the value set that HTTP monitor conditions are evaluated against.
+     *
+     * Every variable declared by HttpMonitorType must appear here, because the
+     * evaluator throws on a variable missing from the context.
+     * @param {object} res Axios response.
+     * @param {number} responseTime Measured response time in milliseconds.
+     * @returns {object} Context keyed by condition variable id.
+     */
+    static buildHttpConditionContext(res, responseTime) {
+        const contentType = res.headers?.["content-type"] ?? "";
+
+        // Axios parses JSON responses for us, so res.data may already be an
+        // object. Conditions on `body` operate on text either way.
+        let body = res.data;
+        let parsedAsJson = body !== null && typeof body === "object";
+        if (typeof body !== "string") {
+            try {
+                body = JSON.stringify(body);
+            } catch (e) {
+                body = String(body);
+            }
+        } else {
+            try {
+                JSON.parse(body);
+                parsedAsJson = true;
+            } catch (e) {
+                parsedAsJson = false;
+            }
+        }
+        body = body ?? "";
+
+        return {
+            status_code: res.status,
+            response_time: responseTime,
+            content_type: contentType,
+            body,
+            body_size: Buffer.byteLength(body, "utf8"),
+            // A string rather than a boolean so it works with the string
+            // operators the condition UI offers.
+            body_is_json: parsedAsJson ? "true" : "false",
+        };
+    }
+
+    /**
+     * Evaluate any user-defined conditions against an HTTP response.
+     * @param {object} res Axios response.
+     * @param {number} responseTime Measured response time in milliseconds.
+     * @returns {void}
+     * @throws {Error} If the conditions do not pass, marking the monitor down.
+     */
+    checkHttpConditions(res, responseTime) {
+        // The column is NOT NULL DEFAULT '[]', but this runs on every beat of
+        // the most common monitor type -- a malformed row must not take the
+        // monitor down with a JSON parse error instead of a real result.
+        let conditions;
+        try {
+            conditions = ConditionExpressionGroup.fromMonitor(this);
+        } catch (e) {
+            log.warn("monitor", `[${this.name}] Ignoring unreadable conditions: ${e.message}`);
+            return;
+        }
+
+        if (!conditions) {
+            return;
+        }
+
+        const context = Monitor.buildHttpConditionContext(res, responseTime);
+        if (!evaluateExpressionGroup(conditions, context)) {
+            throw new Error(
+                `Response did not meet the configured conditions ` +
+                    `(status ${context.status_code}, ${context.response_time}ms, ` +
+                    `${context.body_size} bytes, content-type "${context.content_type}")`
+            );
         }
     }
 

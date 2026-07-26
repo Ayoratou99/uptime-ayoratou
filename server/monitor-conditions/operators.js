@@ -39,6 +39,10 @@ const OP_LTE = "lte";
 
 const OP_GTE = "gte";
 
+const OP_REGEX = "regex";
+
+const OP_NOT_REGEX = "not_regex";
+
 /**
  * Asserts a variable is equal to a value.
  */
@@ -259,6 +263,56 @@ class GreaterThanOrEqualToOperator extends ConditionOperator {
     }
 }
 
+/**
+ * Asserts a variable matches a regular expression.
+ *
+ * The pattern comes from user input, so an invalid one must not take the
+ * monitor down with a cryptic SyntaxError -- it is reported as a failed match
+ * with a clear message instead.
+ */
+class RegexOperator extends ConditionOperator {
+    id = OP_REGEX;
+    caption = "matches regex";
+
+    /**
+     * Compile a user-supplied pattern, supporting an inline /pattern/flags form.
+     * @param {string} value Raw pattern.
+     * @returns {RegExp} Compiled expression.
+     * @throws {Error} If the pattern is not valid.
+     */
+    static compile(value) {
+        const raw = String(value ?? "");
+        const delimited = raw.match(/^\/(.*)\/([gimsuy]*)$/s);
+        try {
+            return delimited ? new RegExp(delimited[1], delimited[2]) : new RegExp(raw);
+        } catch (e) {
+            throw new Error(`Invalid regular expression "${raw}": ${e.message}`);
+        }
+    }
+
+    /**
+     * @inheritdoc
+     */
+    test(variable, value) {
+        return RegexOperator.compile(value).test(String(variable ?? ""));
+    }
+}
+
+/**
+ * Asserts a variable does not match a regular expression.
+ */
+class NotRegexOperator extends ConditionOperator {
+    id = OP_NOT_REGEX;
+    caption = "does not match regex";
+
+    /**
+     * @inheritdoc
+     */
+    test(variable, value) {
+        return !RegexOperator.compile(value).test(String(variable ?? ""));
+    }
+}
+
 const operatorMap = new Map([
     [OP_STR_EQUALS, new StringEqualsOperator()],
     [OP_STR_NOT_EQUALS, new StringNotEqualsOperator()],
@@ -274,6 +328,8 @@ const operatorMap = new Map([
     [OP_GT, new GreaterThanOperator()],
     [OP_LTE, new LessThanOrEqualToOperator()],
     [OP_GTE, new GreaterThanOrEqualToOperator()],
+    [OP_REGEX, new RegexOperator()],
+    [OP_NOT_REGEX, new NotRegexOperator()],
 ]);
 
 const defaultStringOperators = [
@@ -285,6 +341,8 @@ const defaultStringOperators = [
     operatorMap.get(OP_NOT_STARTS_WITH),
     operatorMap.get(OP_ENDS_WITH),
     operatorMap.get(OP_NOT_ENDS_WITH),
+    operatorMap.get(OP_REGEX),
+    operatorMap.get(OP_NOT_REGEX),
 ];
 
 const defaultNumberOperators = [
@@ -297,6 +355,8 @@ const defaultNumberOperators = [
 ];
 
 module.exports = {
+    OP_REGEX,
+    OP_NOT_REGEX,
     OP_STR_EQUALS,
     OP_STR_NOT_EQUALS,
     OP_CONTAINS,
