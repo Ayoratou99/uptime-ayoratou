@@ -48,6 +48,10 @@
                     </div>
                     <!-- eslint-disable-next-line vue/no-v-html-->
                     <div class="incident-content mt-1" v-html="getIncidentHTML(incident.content)"></div>
+
+                    <!-- Full history of how this incident developed -->
+                    <IncidentTimeline :updates="incident.updates || []" />
+
                     <div class="incident-meta text-muted small mt-2">
                         <div>{{ $t("createdAt", { date: datetime(incident.createdDate) }) }}</div>
                         <div v-if="incident.lastUpdatedDate">
@@ -64,9 +68,11 @@
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import datetimeMixin from "../mixins/datetime";
+import IncidentTimeline from "./IncidentTimeline.vue";
 
 export default {
     name: "IncidentHistory",
+    components: { IncidentTimeline },
     mixins: [datetimeMixin],
     props: {
         incidents: {

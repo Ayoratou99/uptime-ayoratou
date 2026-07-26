@@ -337,6 +337,9 @@
                     ></div>
                     <!-- eslint-enable vue/no-v-html -->
 
+                    <!-- How the incident developed, oldest state preserved -->
+                    <IncidentTimeline :updates="activeIncident.updates || []" />
+
                     <!-- Incident Date -->
                     <div class="date mt-3">
                         {{
@@ -356,7 +359,43 @@
                         </span>
                     </div>
 
+                    <!-- Post an update: appends to the timeline instead of
+                         overwriting the incident, so nothing is lost. -->
+                    <div v-if="editMode && updatingIncidentID === activeIncident.id" class="mt-3 incident-update-form">
+                        <div class="mb-2">
+                            <select v-model="incidentUpdate.status" class="form-select">
+                                <option value="investigating">{{ $t("incidentStatus_investigating") }}</option>
+                                <option value="identified">{{ $t("incidentStatus_identified") }}</option>
+                                <option value="monitoring">{{ $t("incidentStatus_monitoring") }}</option>
+                                <option value="resolved">{{ $t("incidentStatus_resolved") }}</option>
+                            </select>
+                        </div>
+                        <div class="mb-2">
+                            <textarea
+                                v-model="incidentUpdate.content"
+                                class="form-control"
+                                rows="3"
+                                :placeholder="$t('incidentUpdatePlaceholder')"
+                            ></textarea>
+                        </div>
+                        <button class="btn btn-light me-2" @click="submitIncidentUpdate(activeIncident)">
+                            <font-awesome-icon icon="save" />
+                            {{ $t("postUpdate") }}
+                        </button>
+                        <button class="btn btn-light" @click="cancelIncidentUpdate">
+                            {{ $t("Cancel") }}
+                        </button>
+                    </div>
+
                     <div v-if="editMode" class="mt-3">
+                        <button
+                            v-if="updatingIncidentID !== activeIncident.id"
+                            class="btn btn-light me-2"
+                            @click="startIncidentUpdate(activeIncident)"
+                        >
+                            <font-awesome-icon icon="plus" />
+                            {{ $t("postUpdate") }}
+                        </button>
                         <button class="btn btn-light me-2" @click="resolveIncident(activeIncident)">
                             <font-awesome-icon icon="check" />
                             {{ $t("Resolve") }}
@@ -623,6 +662,7 @@ import MaintenanceTime from "../components/MaintenanceTime.vue";
 import IncidentHistory from "../components/IncidentHistory.vue";
 import IncidentManageModal from "../components/IncidentManageModal.vue";
 import IncidentEditForm from "../components/IncidentEditForm.vue";
+import IncidentTimeline from "../components/IncidentTimeline.vue";
 import { getResBaseURL } from "../util-frontend";
 import {
     STATUS_PAGE_ALL_DOWN,
@@ -659,6 +699,7 @@ export default {
         IncidentHistory,
         IncidentManageModal,
         IncidentEditForm,
+        IncidentTimeline,
     },
 
     // Leave Page for vue route change
@@ -694,6 +735,12 @@ export default {
             },
             selectedMonitor: null,
             incident: null,
+            /** Incident currently having an update composed for it, if any. */
+            updatingIncidentID: null,
+            incidentUpdate: {
+                status: "identified",
+                content: "",
+            },
             previousIncident: null,
             showImageCropUpload: false,
             imgDataUrl: "/icon.svg",
@@ -1485,6 +1532,48 @@ export default {
             this.$root.getSocket().emit("resolveIncident", this.slug, incident.id, (res) => {
                 this.$root.toastRes(res);
                 if (res.ok) {
+                    this.loadIncidentHistory();
+                }
+            });
+        },
+
+        /**
+         * Open the update composer for an incident.
+         * @param {object} incident Incident being updated.
+         * @returns {void}
+         */
+        startIncidentUpdate(incident) {
+            this.updatingIncidentID = incident.id;
+            this.incidentUpdate = {
+                // Default to the next status an operator usually posts, rather
+                // than repeating the one already shown.
+                status: incident.status === "investigating" ? "identified" : incident.status,
+                content: "",
+            };
+        },
+
+        /**
+         * Close the update composer without saving.
+         * @returns {void}
+         */
+        cancelIncidentUpdate() {
+            this.updatingIncidentID = null;
+            this.incidentUpdate = {
+                status: "identified",
+                content: "",
+            };
+        },
+
+        /**
+         * Append the composed update to the incident's timeline.
+         * @param {object} incident Incident being updated.
+         * @returns {void}
+         */
+        submitIncidentUpdate(incident) {
+            this.$root.getSocket().emit("addIncidentUpdate", this.slug, incident.id, this.incidentUpdate, (res) => {
+                this.$root.toastRes(res);
+                if (res.ok) {
+                    this.cancelIncidentUpdate();
                     this.loadIncidentHistory();
                 }
             });

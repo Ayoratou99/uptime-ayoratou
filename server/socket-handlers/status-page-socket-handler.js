@@ -9,6 +9,8 @@ const { UptimeKumaServer } = require("../uptime-kuma-server");
 const { Settings } = require("../settings");
 const { PERMISSIONS } = require("../permissions");
 const { requirePermission, requireActOn } = require("../socket-permissions");
+const Incident = require("../model/incident");
+const { INCIDENT_STATUS, INCIDENT_STATUS_LIST } = require("../model/incident");
 
 /**
  * Resolve a status page the socket's user is allowed to modify.
@@ -75,12 +77,20 @@ module.exports.statusPageSocketHandler = (socket) => {
                 incidentBean = R.dispense("incident");
             }
 
+            const isNew = !incidentBean.id;
+
             incidentBean.title = incident.title;
             incidentBean.content = incident.content;
             incidentBean.style = incident.style;
             incidentBean.pin = true;
             incidentBean.active = true;
             incidentBean.status_page_id = statusPageID;
+
+            if (INCIDENT_STATUS_LIST.includes(incident.status)) {
+                incidentBean.status = incident.status;
+            } else if (isNew) {
+                incidentBean.status = INCIDENT_STATUS.INVESTIGATING;
+            }
 
             if (incident.id) {
                 incidentBean.last_updated_date = R.isoDateTime(dayjs.utc());
@@ -90,9 +100,23 @@ module.exports.statusPageSocketHandler = (socket) => {
 
             await R.store(incidentBean);
 
+            // Seed the timeline so a freshly posted incident already reads as
+            // history rather than gaining its first entry only on the next edit.
+            if (isNew) {
+                const first = R.dispense("incident_update");
+                first.incident_id = incidentBean.id;
+                first.status = incidentBean.status;
+                first.content = incidentBean.content;
+                first.created_date = incidentBean.created_date;
+                first.created_by = socket.userID;
+                await R.store(first);
+            }
+
+            const updates = await Incident.getUpdatesFor([incidentBean.id]);
+
             callback({
                 ok: true,
-                incident: incidentBean.toPublicJSON(),
+                incident: incidentBean.toPublicJSON(updates.get(incidentBean.id) ?? []),
             });
         } catch (error) {
             callback({
@@ -223,6 +247,34 @@ module.exports.statusPageSocketHandler = (socket) => {
         }
     });
 
+    // Append an entry to an incident's timeline. This is the non-destructive
+    // counterpart to editIncident, which rewrites the incident in place.
+    socket.on("addIncidentUpdate", async (slug, incidentID, update, callback) => {
+        try {
+            const statusPageID = (await getEditableStatusPage(socket, slug)).id;
+
+            const bean = await R.findOne("incident", " id = ? AND status_page_id = ? ", [incidentID, statusPageID]);
+            if (!bean) {
+                callback({ ok: false, msg: "Incident not found or access denied", msgi18n: true });
+                return;
+            }
+
+            await bean.addUpdate(update?.status, update?.content, socket.userID);
+            apicache.clear();
+
+            const updates = await Incident.getUpdatesFor([bean.id]);
+
+            callback({
+                ok: true,
+                msg: "Saved.",
+                msgi18n: true,
+                incident: bean.toPublicJSON(updates.get(bean.id) ?? []),
+            });
+        } catch (error) {
+            callback({ ok: false, msg: error.message });
+        }
+    });
+
     socket.on("resolveIncident", async (slug, incidentID, callback) => {
         try {
             const statusPageID = (await getEditableStatusPage(socket, slug)).id;
@@ -237,13 +289,26 @@ module.exports.statusPageSocketHandler = (socket) => {
                 return;
             }
 
+            // Record the resolution on the timeline so the page shows when it
+            // ended, not just that it is no longer active.
+            const resolutionNote = R.dispense("incident_update");
+            resolutionNote.incident_id = bean.id;
+            resolutionNote.status = INCIDENT_STATUS.RESOLVED;
+            resolutionNote.content = "Resolved.";
+            resolutionNote.created_date = R.isoDateTime(dayjs.utc());
+            resolutionNote.created_by = socket.userID;
+            await R.store(resolutionNote);
+
             await bean.resolve();
+            apicache.clear();
+
+            const updates = await Incident.getUpdatesFor([bean.id]);
 
             callback({
                 ok: true,
                 msg: "Resolved",
                 msgi18n: true,
-                incident: bean.toPublicJSON(),
+                incident: bean.toPublicJSON(updates.get(bean.id) ?? []),
             });
         } catch (error) {
             callback({

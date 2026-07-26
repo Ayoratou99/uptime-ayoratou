@@ -321,7 +321,11 @@ class StatusPage extends BeanModel {
             "pin = 1 AND active = 1 AND status_page_id = ? ORDER BY created_date DESC",
             [statusPage.id]
         );
-        incidents = incidents.map((i) => i.toPublicJSON());
+        // Pinned incidents carry their timeline so the page can show how the
+        // situation developed, not just the latest text.
+        const Incident = require("./incident");
+        const activeUpdates = await Incident.getUpdatesFor(incidents.map((i) => i.id));
+        incidents = incidents.map((i) => i.toPublicJSON(activeUpdates.get(i.id) ?? []));
 
         let maintenanceList = await StatusPage.getMaintenanceList(statusPage.id);
 
@@ -556,8 +560,12 @@ class StatusPage extends BeanModel {
             }
         }
 
+        // One query for the whole page of incidents rather than one per incident.
+        const Incident = require("./incident");
+        const updates = await Incident.getUpdatesFor(incidents.map((i) => i.id));
+
         return {
-            incidents: incidents.map((i) => i.toPublicJSON()),
+            incidents: incidents.map((i) => i.toPublicJSON(updates.get(i.id) ?? [])),
             total,
             nextCursor,
             hasMore,
