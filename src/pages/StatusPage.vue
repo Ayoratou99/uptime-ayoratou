@@ -430,37 +430,23 @@
             </template>
 
             <!-- Overall Status -->
-            <div class="shadow-box list p-4 overall-status mb-4">
-                <div v-if="Object.keys($root.publicMonitorList).length === 0 && loadedData">
-                    <font-awesome-icon icon="question-circle" class="ok" />
-                    {{ $t("No Services") }}
+            <div class="shadow-box status-banner mb-4" :class="'is-' + overallStatusKey">
+                <div class="status-banner-icon">
+                    <font-awesome-icon :icon="overallStatusIcon" />
                 </div>
-
-                <template v-else>
-                    <div v-if="allUp">
-                        <font-awesome-icon icon="check-circle" class="ok" />
-                        {{ $t("All Systems Operational") }}
+                <div class="status-banner-text">
+                    <div class="status-banner-headline">{{ overallStatusHeadline }}</div>
+                    <div v-if="serviceCounts.total > 0" class="status-banner-summary">
+                        {{ $t("servicesOperational", { up: serviceCounts.up, total: serviceCounts.total }) }}
+                        <span v-if="serviceCounts.down > 0">&middot; {{ $t("nDown", { n: serviceCounts.down }) }}</span>
+                        <span v-if="serviceCounts.maintenance > 0">
+                            &middot; {{ $t("nInMaintenance", { n: serviceCounts.maintenance }) }}
+                        </span>
                     </div>
-
-                    <div v-else-if="partialDown">
-                        <font-awesome-icon icon="exclamation-circle" class="warning" />
-                        {{ $t("Partially Degraded Service") }}
-                    </div>
-
-                    <div v-else-if="allDown">
-                        <font-awesome-icon icon="times-circle" class="danger" />
-                        {{ $t("Degraded Service") }}
-                    </div>
-
-                    <div v-else-if="isMaintenance">
-                        <font-awesome-icon icon="wrench" class="status-maintenance" />
-                        {{ $t("maintenanceStatus-under-maintenance") }}
-                    </div>
-
-                    <div v-else>
-                        <font-awesome-icon icon="question-circle" style="color: #efefef" />
-                    </div>
-                </template>
+                </div>
+                <div v-if="lastUpdatedLabel" class="status-banner-updated">
+                    {{ $t("lastUpdated", { time: lastUpdatedLabel }) }}
+                </div>
             </div>
 
             <!-- Maintenance -->
@@ -690,6 +676,7 @@ import {
     STATUS_PAGE_PARTIAL_DOWN,
     UP,
     MAINTENANCE,
+    DOWN,
 } from "../util.ts";
 import Tag from "../components/Tag.vue";
 import VueMultiselect from "vue-multiselect";
@@ -899,6 +886,104 @@ export default {
 
         isMaintenance() {
             return this.overallStatus === STATUS_PAGE_MAINTENANCE;
+        },
+
+        /**
+         * Short key for the overall state, used to pick the banner's colour,
+         * icon and wording without repeating the same branch three times.
+         * @returns {string} One of operational, degraded, down, maintenance, unknown.
+         */
+        overallStatusKey() {
+            if (Object.keys(this.$root.publicMonitorList).length === 0 && this.loadedData) {
+                return "unknown";
+            }
+            if (this.isMaintenance) {
+                return "maintenance";
+            }
+            if (this.allUp) {
+                return "operational";
+            }
+            if (this.partialDown) {
+                return "degraded";
+            }
+            if (this.allDown) {
+                return "down";
+            }
+            return "unknown";
+        },
+
+        /**
+         * Icon matching the overall state.
+         * @returns {string} Font Awesome icon name.
+         */
+        overallStatusIcon() {
+            return {
+                operational: "check-circle",
+                degraded: "exclamation-circle",
+                down: "times-circle",
+                maintenance: "wrench",
+                unknown: "question-circle",
+            }[this.overallStatusKey];
+        },
+
+        /**
+         * Headline matching the overall state.
+         *
+         * Resolved through a lookup rather than key concatenation so the
+         * translation key checker can see each key literally.
+         * @returns {string} Translated headline.
+         */
+        overallStatusHeadline() {
+            return {
+                operational: this.$t("All Systems Operational"),
+                degraded: this.$t("Partially Degraded Service"),
+                down: this.$t("Degraded Service"),
+                maintenance: this.$t("maintenanceStatus-under-maintenance"),
+                unknown: this.$t("No Services"),
+            }[this.overallStatusKey];
+        },
+
+        /**
+         * Tally of monitors by current state, for the banner summary line.
+         * @returns {object} Counts keyed by state plus a total.
+         */
+        serviceCounts() {
+            const counts = { up: 0, down: 0, maintenance: 0, pending: 0, total: 0 };
+
+            for (const id in this.$root.publicLastHeartbeatList) {
+                const beat = this.$root.publicLastHeartbeatList[id];
+                counts.total++;
+
+                if (beat.status === UP) {
+                    counts.up++;
+                } else if (beat.status === MAINTENANCE) {
+                    counts.maintenance++;
+                } else if (beat.status === DOWN) {
+                    counts.down++;
+                } else {
+                    counts.pending++;
+                }
+            }
+
+            return counts;
+        },
+
+        /**
+         * Time of the most recent heartbeat across all published monitors, so
+         * readers can tell how fresh the page is.
+         * @returns {string} Formatted time, or an empty string when unknown.
+         */
+        lastUpdatedLabel() {
+            let latest = null;
+
+            for (const id in this.$root.publicLastHeartbeatList) {
+                const time = this.$root.publicLastHeartbeatList[id]?.time;
+                if (time && (!latest || time > latest)) {
+                    latest = time;
+                }
+            }
+
+            return latest ? this.$root.datetime(latest) : "";
         },
 
         incidentHTML() {
@@ -1605,20 +1690,100 @@ export default {
 <style lang="scss" scoped>
 @import "../assets/vars.scss";
 
-.overall-status {
-    font-weight: bold;
-    font-size: 25px;
+// Overall status banner. A left accent bar plus a tinted icon carries the
+// state at a glance, while the text stays at normal contrast so it remains
+// readable in both themes and against a custom background.
+.status-banner {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 20px 22px;
+    position: relative;
+    overflow: hidden;
 
-    .ok {
-        color: $primary;
+    &::before {
+        content: "";
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 5px;
+        background: $secondary-text;
     }
 
-    .warning {
-        color: $warning;
+    .status-banner-icon {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        font-size: 20px;
+        background: rgba(128, 128, 128, 0.12);
+        color: $secondary-text;
     }
 
-    .danger {
-        color: $danger;
+    .status-banner-text {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    .status-banner-headline {
+        font-size: 22px;
+        font-weight: 700;
+        line-height: 1.25;
+    }
+
+    .status-banner-summary {
+        margin-top: 2px;
+        font-size: 14px;
+        color: $secondary-text;
+    }
+
+    .status-banner-updated {
+        flex: 0 0 auto;
+        font-size: 12px;
+        color: $secondary-text;
+        text-align: right;
+    }
+
+    &.is-operational {
+        &::before {
+            background: $primary;
+        }
+        .status-banner-icon {
+            background: rgba(92, 221, 139, 0.15);
+            color: $primary;
+        }
+    }
+
+    &.is-degraded {
+        &::before {
+            background: $warning;
+        }
+        .status-banner-icon {
+            background: rgba(248, 163, 6, 0.15);
+            color: $warning;
+        }
+    }
+
+    &.is-down {
+        &::before {
+            background: $danger;
+        }
+        .status-banner-icon {
+            background: rgba(220, 53, 69, 0.15);
+            color: $danger;
+        }
+    }
+
+    &.is-maintenance {
+        &::before {
+            background: $maintenance;
+        }
+        .status-banner-icon {
+            background: rgba(23, 71, 245, 0.12);
+            color: $maintenance;
+        }
     }
 }
 
@@ -1817,8 +1982,19 @@ footer {
         font-size: 22px;
     }
 
-    .overall-status {
-        font-size: 20px;
+    .status-banner {
+        flex-wrap: wrap;
+        gap: 12px;
+        padding: 16px;
+
+        .status-banner-headline {
+            font-size: 18px;
+        }
+
+        .status-banner-updated {
+            flex-basis: 100%;
+            text-align: left;
+        }
     }
 }
 

@@ -113,6 +113,11 @@ module.exports.statusPageSocketHandler = (socket) => {
                 await R.store(first);
             }
 
+            // The public status page and incident history endpoints are cached
+            // for 5 minutes, so without this a newly posted incident stays
+            // invisible to visitors for up to that long.
+            apicache.clear();
+
             const updates = await Incident.getUpdatesFor([incidentBean.id]);
             const incidentJSON = incidentBean.toPublicJSON(updates.get(incidentBean.id) ?? []);
 
@@ -141,6 +146,7 @@ module.exports.statusPageSocketHandler = (socket) => {
             const statusPageID = (await getEditableStatusPage(socket, slug)).id;
 
             await R.exec("UPDATE incident SET pin = 0 WHERE pin = 1 AND status_page_id = ? ", [statusPageID]);
+            apicache.clear();
 
             callback({
                 ok: true,
@@ -211,6 +217,7 @@ module.exports.statusPageSocketHandler = (socket) => {
             bean.lastUpdatedDate = R.isoDateTime(dayjs.utc());
 
             await R.store(bean);
+            apicache.clear();
 
             callback({
                 ok: true,
@@ -242,6 +249,7 @@ module.exports.statusPageSocketHandler = (socket) => {
             }
 
             await R.trash(bean);
+            apicache.clear();
 
             callback({
                 ok: true,
