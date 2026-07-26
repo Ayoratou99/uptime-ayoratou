@@ -7,6 +7,12 @@ const { R } = require("redbean-node");
 const { badgeConstants } = require("../../src/util");
 const { makeBadge } = require("badge-maker");
 const { UptimeCalculator } = require("../uptime-calculator");
+const { escape } = require("html-escaper");
+const validator = require("validator");
+const dayjs = require("dayjs");
+const { log } = require("../../src/util");
+const { subscriptionRateLimiter } = require("../rate-limiter");
+const { generateToken, sendConfirmationEmail } = require("../status-page-mailer");
 
 let router = express.Router();
 
@@ -256,6 +262,157 @@ router.get("/api/status-page/:slug/badge", cache("5 minutes"), async (request, r
 
         response.type("image/svg+xml");
         response.send(svg);
+    } catch (error) {
+        sendHttpError(response, error.message);
+    }
+});
+
+/**
+ * Render a small standalone page for the confirm/unsubscribe links, which are
+ * opened straight from an email client rather than inside the SPA.
+ * @param {object} response Express response.
+ * @param {string} title Heading.
+ * @param {string} message Body text.
+ * @param {string} slug Status page slug to link back to.
+ * @returns {void}
+ */
+function sendSubscriptionPage(response, title, message, slug) {
+    const safe = (text) => escape(String(text ?? ""));
+    response.type("html").send(`<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${safe(title)}</title></head>
+<body style="margin:0;padding:40px 20px;background:#f6f7f9;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1f2328">
+  <div style="max-width:520px;margin:0 auto;background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:32px;text-align:center">
+    <h1 style="margin:0 0 12px;font-size:20px">${safe(title)}</h1>
+    <p style="margin:0 0 24px;color:#4b5563">${safe(message)}</p>
+    <a href="/status/${encodeURIComponent(slug)}" style="display:inline-block;background:#5cdd8b;color:#0b2a17;text-decoration:none;padding:10px 18px;border-radius:6px;font-weight:600">Back to status page</a>
+  </div>
+</body></html>`);
+}
+
+// Public subscription endpoint. Creates an unconfirmed subscriber and emails a
+// confirmation link; nothing is delivered until that link is opened.
+router.post("/api/status-page/:slug/subscribe", async (request, response) => {
+    allowDevAllOrigin(response);
+
+    try {
+        if (!(await subscriptionRateLimiter.pass(null, 0))) {
+            response.status(429).json({ ok: false, msg: "Too many subscription requests, try again later." });
+            return;
+        }
+        await subscriptionRateLimiter.removeTokens(1);
+
+        const slug = String(request.params.slug ?? "").toLowerCase();
+        const statusPage = await R.findOne("status_page", " slug = ? ", [slug]);
+
+        if (!statusPage) {
+            sendHttpError(response, "Status Page Not Found");
+            return;
+        }
+        if (!statusPage.subscription_enabled) {
+            response.status(403).json({ ok: false, msg: "Subscriptions are not enabled for this status page." });
+            return;
+        }
+
+        const email = String(request.body?.email ?? "")
+            .trim()
+            .toLowerCase();
+        if (!validator.isEmail(email)) {
+            response.status(400).json({ ok: false, msg: "Please enter a valid email address." });
+            return;
+        }
+
+        let subscriber = await R.findOne("status_page_subscriber", " status_page_id = ? AND email = ? ", [
+            statusPage.id,
+            email,
+        ]);
+
+        // Answer identically whether or not the address is already subscribed,
+        // so this endpoint cannot be used to test who is on the list.
+        const genericReply = {
+            ok: true,
+            msg: "Check your inbox for a confirmation link.",
+        };
+
+        if (subscriber && subscriber.confirmed) {
+            response.json(genericReply);
+            return;
+        }
+
+        if (!subscriber) {
+            subscriber = R.dispense("status_page_subscriber");
+            subscriber.status_page_id = statusPage.id;
+            subscriber.email = email;
+            subscriber.unsubscribe_token = generateToken();
+        }
+        subscriber.confirmed = false;
+        subscriber.confirm_token = generateToken();
+        await R.store(subscriber);
+
+        try {
+            await sendConfirmationEmail(statusPage, subscriber);
+        } catch (e) {
+            log.warn("status-page-mail", `Could not send confirmation to ${email}: ${e.message}`);
+            response.status(500).json({ ok: false, msg: "Could not send the confirmation email." });
+            return;
+        }
+
+        response.json(genericReply);
+    } catch (error) {
+        sendHttpError(response, error.message);
+    }
+});
+
+// Opened from the confirmation email.
+router.get("/status/:slug/subscribe/confirm/:token", async (request, response) => {
+    try {
+        const slug = String(request.params.slug ?? "").toLowerCase();
+        const subscriber = await R.findOne("status_page_subscriber", " confirm_token = ? ", [request.params.token]);
+
+        if (!subscriber) {
+            sendSubscriptionPage(
+                response,
+                "Link no longer valid",
+                "This confirmation link has already been used or has expired.",
+                slug
+            );
+            return;
+        }
+
+        subscriber.confirmed = true;
+        subscriber.confirm_token = null;
+        subscriber.confirmed_date = R.isoDateTime(dayjs.utc());
+        await R.store(subscriber);
+
+        sendSubscriptionPage(
+            response,
+            "Subscription confirmed",
+            "You will now receive status updates by email. Every message includes an unsubscribe link.",
+            slug
+        );
+    } catch (error) {
+        sendHttpError(response, error.message);
+    }
+});
+
+// One-click unsubscribe, linked from every notification.
+router.get("/status/:slug/subscribe/unsubscribe/:token", async (request, response) => {
+    try {
+        const slug = String(request.params.slug ?? "").toLowerCase();
+        const subscriber = await R.findOne("status_page_subscriber", " unsubscribe_token = ? ", [request.params.token]);
+
+        if (subscriber) {
+            await R.trash(subscriber);
+        }
+
+        // Same wording either way: an already-removed address should not be
+        // distinguishable from one removed just now.
+        sendSubscriptionPage(
+            response,
+            "Unsubscribed",
+            "You will no longer receive status updates for this page.",
+            slug
+        );
     } catch (error) {
         sendHttpError(response, error.message);
     }

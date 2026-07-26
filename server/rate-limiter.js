@@ -79,8 +79,19 @@ const twoFaRateLimiter = new KumaRateLimiter({
     errorMessage: "Too frequently, try again later.",
 });
 
+// Status page subscription is an unauthenticated endpoint that causes an email
+// to be sent, so it is limited far more tightly than the API as a whole to stop
+// it being used to flood an address or burn through the SMTP quota.
+const subscriptionRateLimiter = new KumaRateLimiter({
+    tokensPerInterval: 10,
+    interval: "minute",
+    fireImmediately: true,
+    errorMessage: "Too many subscription requests, try again later.",
+});
+
 module.exports = {
     loginRateLimiter,
     apiRateLimiter,
     twoFaRateLimiter,
+    subscriptionRateLimiter,
 };

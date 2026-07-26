@@ -87,6 +87,20 @@
                     <label class="form-check-label" for="show-powered-by">{{ $t("Show Powered By") }}</label>
                 </div>
 
+                <!-- Public email subscriptions -->
+                <div class="my-3 form-check form-switch">
+                    <input
+                        id="subscription-enabled"
+                        v-model="config.subscriptionEnabled"
+                        class="form-check-input"
+                        type="checkbox"
+                    />
+                    <label class="form-check-label" for="subscription-enabled">
+                        {{ $t("enableSubscriptions") }}
+                    </label>
+                    <div class="form-text">{{ $t("enableSubscriptionsDescription") }}</div>
+                </div>
+
                 <!-- Show certificate expiry -->
                 <div class="my-3 form-check form-switch">
                     <input
@@ -536,6 +550,10 @@
                 />
             </div>
 
+            <!-- Email subscriptions, when the page owner has enabled them.
+                 Hidden in edit mode, where the toggle in the sidebar applies. -->
+            <StatusPageSubscribe v-if="config.subscriptionEnabled && !enableEditMode" :slug="slug" />
+
             <!-- Past Incidents -->
             <div v-if="pastIncidentCount > 0" class="past-incidents-section mb-4">
                 <h2 class="past-incidents-title mb-3">
@@ -663,6 +681,7 @@ import IncidentHistory from "../components/IncidentHistory.vue";
 import IncidentManageModal from "../components/IncidentManageModal.vue";
 import IncidentEditForm from "../components/IncidentEditForm.vue";
 import IncidentTimeline from "../components/IncidentTimeline.vue";
+import StatusPageSubscribe from "../components/StatusPageSubscribe.vue";
 import { getResBaseURL } from "../util-frontend";
 import {
     STATUS_PAGE_ALL_DOWN,
@@ -700,6 +719,7 @@ export default {
         IncidentManageModal,
         IncidentEditForm,
         IncidentTimeline,
+        StatusPageSubscribe,
     },
 
     // Leave Page for vue route change

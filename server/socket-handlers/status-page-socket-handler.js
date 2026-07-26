@@ -11,6 +11,7 @@ const { PERMISSIONS } = require("../permissions");
 const { requirePermission, requireActOn } = require("../socket-permissions");
 const Incident = require("../model/incident");
 const { INCIDENT_STATUS, INCIDENT_STATUS_LIST } = require("../model/incident");
+const statusPageMailer = require("../status-page-mailer");
 
 /**
  * Resolve a status page the socket's user is allowed to modify.
@@ -113,10 +114,19 @@ module.exports.statusPageSocketHandler = (socket) => {
             }
 
             const updates = await Incident.getUpdatesFor([incidentBean.id]);
+            const incidentJSON = incidentBean.toPublicJSON(updates.get(incidentBean.id) ?? []);
+
+            // Only a newly posted incident mails subscribers; an edit is a
+            // correction, not news. Follow-ups go out via addIncidentUpdate.
+            if (isNew) {
+                statusPageMailer
+                    .notifyIncident(statusPageID, incidentJSON)
+                    .catch((e) => log.warn("status-page-mail", e.message));
+            }
 
             callback({
                 ok: true,
-                incident: incidentBean.toPublicJSON(updates.get(incidentBean.id) ?? []),
+                incident: incidentJSON,
             });
         } catch (error) {
             callback({
@@ -247,6 +257,109 @@ module.exports.statusPageSocketHandler = (socket) => {
         }
     });
 
+    socket.on("getStatusPageSmtp", async (callback) => {
+        try {
+            await requirePermission(socket, PERMISSIONS.SETTINGS_MANAGE);
+            const config = await statusPageMailer.getSmtpConfig();
+            callback({
+                ok: true,
+                // The password is write-only: report whether one is stored
+                // rather than sending it back to the browser.
+                config: { ...config, password: undefined, hasPassword: !!config.password },
+            });
+        } catch (e) {
+            callback({ ok: false, msg: e.message });
+        }
+    });
+
+    socket.on("setStatusPageSmtp", async (config, callback) => {
+        try {
+            await requirePermission(socket, PERMISSIONS.SETTINGS_MANAGE);
+
+            const existing = await statusPageMailer.getSmtpConfig();
+            const next = {
+                host: String(config?.host ?? "").trim(),
+                port: Number(config?.port) || 587,
+                secure: !!config?.secure,
+                ignoreTLSError: !!config?.ignoreTLSError,
+                username: String(config?.username ?? "").trim(),
+                // A blank password means "keep the stored one", so saving other
+                // fields does not silently wipe the credential.
+                password: config?.password ? String(config.password) : (existing.password ?? ""),
+                fromAddress: String(config?.fromAddress ?? "").trim(),
+                fromName: String(config?.fromName ?? "").trim(),
+            };
+
+            await Settings.setSettings(statusPageMailer.SETTINGS_TYPE, next);
+            callback({ ok: true, msg: "Saved.", msgi18n: true });
+        } catch (e) {
+            callback({ ok: false, msg: e.message });
+        }
+    });
+
+    socket.on("testStatusPageSmtp", async (to, callback) => {
+        try {
+            await requirePermission(socket, PERMISSIONS.SETTINGS_MANAGE);
+
+            const recipient = String(to ?? "").trim();
+            if (!recipient) {
+                throw new Error("Please enter a recipient address");
+            }
+
+            await statusPageMailer.sendMail({
+                to: recipient,
+                subject: "Ayoratou test email",
+                text: "This is a test email from Ayoratou. Your status page SMTP settings are working.",
+                html: "<p>This is a test email from Ayoratou. Your status page SMTP settings are working.</p>",
+            });
+
+            callback({ ok: true, msg: "Sent Successfully." });
+        } catch (e) {
+            callback({ ok: false, msg: e.message });
+        }
+    });
+
+    socket.on("getStatusPageSubscribers", async (slug, callback) => {
+        try {
+            const statusPage = await getEditableStatusPage(socket, slug);
+            const subscribers = await R.find(
+                "status_page_subscriber",
+                " status_page_id = ? ORDER BY created_date DESC ",
+                [statusPage.id]
+            );
+
+            callback({
+                ok: true,
+                subscribers: subscribers.map((s) => ({
+                    id: s.id,
+                    email: s.email,
+                    confirmed: !!s.confirmed,
+                    createdDate: s.created_date,
+                })),
+            });
+        } catch (e) {
+            callback({ ok: false, msg: e.message });
+        }
+    });
+
+    socket.on("deleteStatusPageSubscriber", async (slug, subscriberID, callback) => {
+        try {
+            const statusPage = await getEditableStatusPage(socket, slug);
+            const subscriber = await R.findOne("status_page_subscriber", " id = ? AND status_page_id = ? ", [
+                subscriberID,
+                statusPage.id,
+            ]);
+
+            if (subscriber) {
+                await R.trash(subscriber);
+            }
+
+            callback({ ok: true, msg: "successDeleted", msgi18n: true });
+        } catch (e) {
+            callback({ ok: false, msg: e.message });
+        }
+    });
+
     // Append an entry to an incident's timeline. This is the non-destructive
     // counterpart to editIncident, which rewrites the incident in place.
     socket.on("addIncidentUpdate", async (slug, incidentID, update, callback) => {
@@ -259,16 +372,21 @@ module.exports.statusPageSocketHandler = (socket) => {
                 return;
             }
 
-            await bean.addUpdate(update?.status, update?.content, socket.userID);
+            const stored = await bean.addUpdate(update?.status, update?.content, socket.userID);
             apicache.clear();
 
             const updates = await Incident.getUpdatesFor([bean.id]);
+            const incidentJSON = bean.toPublicJSON(updates.get(bean.id) ?? []);
+
+            statusPageMailer
+                .notifyIncident(statusPageID, incidentJSON, { status: stored.status, content: stored.content })
+                .catch((e) => log.warn("status-page-mail", e.message));
 
             callback({
                 ok: true,
                 msg: "Saved.",
                 msgi18n: true,
-                incident: bean.toPublicJSON(updates.get(bean.id) ?? []),
+                incident: incidentJSON,
             });
         } catch (error) {
             callback({ ok: false, msg: error.message });
@@ -303,12 +421,17 @@ module.exports.statusPageSocketHandler = (socket) => {
             apicache.clear();
 
             const updates = await Incident.getUpdatesFor([bean.id]);
+            const incidentJSON = bean.toPublicJSON(updates.get(bean.id) ?? []);
+
+            statusPageMailer
+                .notifyIncident(statusPageID, incidentJSON, { status: INCIDENT_STATUS.RESOLVED, content: "Resolved." })
+                .catch((e) => log.warn("status-page-mail", e.message));
 
             callback({
                 ok: true,
                 msg: "Resolved",
                 msgi18n: true,
-                incident: bean.toPublicJSON(updates.get(bean.id) ?? []),
+                incident: incidentJSON,
             });
         } catch (error) {
             callback({
@@ -375,6 +498,7 @@ module.exports.statusPageSocketHandler = (socket) => {
             statusPage.footer_text = config.footerText;
             statusPage.custom_css = config.customCSS;
             statusPage.show_powered_by = config.showPoweredBy;
+            statusPage.subscription_enabled = !!config.subscriptionEnabled;
             statusPage.rss_title = config.rssTitle;
             statusPage.show_only_last_heartbeat = config.showOnlyLastHeartbeat;
             statusPage.show_certificate_expiry = config.showCertificateExpiry;

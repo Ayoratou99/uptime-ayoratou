@@ -19,6 +19,7 @@ import DockerHosts from "./components/settings/Docker.vue";
 import ManageMaintenance from "./pages/ManageMaintenance.vue";
 import APIKeys from "./components/settings/APIKeys.vue";
 import Users from "./components/settings/Users.vue";
+import StatusPageEmail from "./components/settings/StatusPageEmail.vue";
 import SetupDatabase from "./pages/SetupDatabase.vue";
 
 // Settings - Sub Pages
@@ -131,6 +132,10 @@ const routes = [
                             {
                                 path: "users",
                                 component: Users,
+                            },
+                            {
+                                path: "status-page-email",
+                                component: StatusPageEmail,
                             },
                             {
                                 path: "proxies",

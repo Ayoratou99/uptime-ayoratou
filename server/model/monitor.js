@@ -53,6 +53,7 @@ const { UptimeKumaServer } = require("../uptime-kuma-server");
 const { ROOM_VIEW_ALL_MONITORS } = require("../socket-permissions");
 const { ConditionExpressionGroup } = require("../monitor-conditions/expression");
 const { evaluateExpressionGroup } = require("../monitor-conditions/evaluator");
+const statusPageMailer = require("../status-page-mailer");
 const { DockerHost } = require("../docker");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
@@ -982,6 +983,13 @@ class Monitor extends BeanModel {
                 if (Monitor.isImportantForNotification(isFirstBeat, previousBeat?.status, bean.status)) {
                     log.debug("monitor", `[${this.name}] sendNotification`);
                     await Monitor.sendNotification(isFirstBeat, this, bean);
+
+                    // Tell public subscribers of any status page publishing this
+                    // monitor. Deliberately not awaited: mail delivery must not
+                    // delay or interrupt the heartbeat loop.
+                    statusPageMailer
+                        .notifyMonitorChange(this, bean.status === UP, bean.msg)
+                        .catch((e) => log.warn("status-page-mail", e.message));
                 } else {
                     log.debug(
                         "monitor",
