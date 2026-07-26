@@ -915,6 +915,8 @@
     "auto acknowledged": "auto acknowledged",
     "auto resolve": "auto resolve",
     "alertaApiEndpoint": "API Endpoint",
+    "addedBy": "Added by {user}",
+    "addedByUnknown": "Added by a deleted user",
     "Users": "Users",
     "Role": "Role",
     "you": "you",

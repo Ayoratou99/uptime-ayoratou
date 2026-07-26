@@ -13,6 +13,11 @@
             </h1>
             <!-- eslint-disable-next-line vue/no-v-html-->
             <p v-if="monitor.description" v-html="descriptionHTML"></p>
+            <p class="added-by">
+                <font-awesome-icon icon="user" />
+                <span v-if="monitor.owner">{{ $t("addedBy", { user: ownerName }) }}</span>
+                <span v-else>{{ $t("addedByUnknown") }}</span>
+            </p>
             <div class="d-flex">
                 <div class="tags">
                     <Tag
@@ -602,6 +607,19 @@ export default {
                 return "";
             }
         },
+
+        /**
+         * Display name of the user who created this monitor, preferring their
+         * display name over their login name.
+         * @returns {string} Name to show.
+         */
+        ownerName() {
+            const owner = this.monitor?.owner;
+            if (!owner) {
+                return "";
+            }
+            return owner.displayName || owner.username;
+        },
     },
 
     watch: {
@@ -874,6 +892,15 @@ export default {
 
 .form-check {
     margin-top: 16px;
+}
+
+.added-by {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 14px;
+    color: $secondary-text;
+    margin-bottom: 8px;
 }
 
 @media (max-width: 767px) {

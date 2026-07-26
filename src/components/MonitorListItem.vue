@@ -37,6 +37,10 @@
                             </span>
                             <div class="flex-fill text-truncate" style="min-width: 0">
                                 <div class="text-truncate">{{ monitor.name }}</div>
+                                <!-- Only meaningful once more than one person can own monitors. -->
+                                <div v-if="showOwner" class="owner text-truncate">
+                                    {{ $t("addedBy", { user: ownerName }) }}
+                                </div>
                                 <div v-if="monitor.tags.length > 0" class="tags gap-1">
                                     <Tag
                                         v-for="tag in monitor.tags"
@@ -147,6 +151,24 @@ export default {
         };
     },
     computed: {
+        /**
+         * Whether to label this row with its creator. Only worth the space once
+         * the viewer can see monitors belonging to other people.
+         * @returns {boolean} True if the owner line should render.
+         */
+        showOwner() {
+            return !!this.monitor.owner && this.$root.can("monitor.view.all");
+        },
+
+        /**
+         * Display name of the monitor's creator.
+         * @returns {string} Name to show.
+         */
+        ownerName() {
+            const owner = this.monitor.owner;
+            return owner ? owner.displayName || owner.username : "";
+        },
+
         sortedChildMonitorList() {
             let result = Object.values(this.$root.monitorList);
 
@@ -345,6 +367,12 @@ export default {
     display: flex;
     flex-wrap: wrap;
     gap: 0;
+}
+
+.owner {
+    font-size: 12px;
+    padding-left: 4px;
+    color: $secondary-text;
 }
 
 .collapsed {

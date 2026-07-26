@@ -324,6 +324,41 @@ describe("User management", () => {
         });
     });
 
+    describe("monitor ownership", () => {
+        test("resolves the owner of each monitor in one lookup", async () => {
+            const alice = await makeUser("alice", ROLE_EDITOR, { display_name: "Alice A." });
+            const bob = await makeUser("bob", ROLE_EDITOR);
+
+            const [m1] = await knex("monitor").insert({ name: "a", user_id: alice, interval: 60 });
+            const [m2] = await knex("monitor").insert({ name: "b", user_id: bob, interval: 60 });
+
+            const Monitor = require("../../server/model/monitor");
+            const rows = await Monitor.getMonitorOwner([m1, m2]);
+            const byMonitor = Object.fromEntries(rows.map((r) => [r.monitor_id, r]));
+
+            assert.strictEqual(byMonitor[m1].username, "alice");
+            assert.strictEqual(byMonitor[m1].display_name, "Alice A.");
+            assert.strictEqual(byMonitor[m2].username, "bob");
+            assert.strictEqual(byMonitor[m2].display_name, null);
+        });
+
+        test("an unowned monitor resolves to a null user rather than being dropped", async () => {
+            const [orphan] = await knex("monitor").insert({ name: "orphan", user_id: null, interval: 60 });
+
+            const Monitor = require("../../server/model/monitor");
+            const rows = await Monitor.getMonitorOwner([orphan]);
+
+            assert.strictEqual(rows.length, 1, "the monitor must still appear");
+            assert.strictEqual(rows[0].user_id, null);
+            assert.strictEqual(rows[0].username, null);
+        });
+
+        test("an empty id list does not hit the database", async () => {
+            const Monitor = require("../../server/model/monitor");
+            assert.deepStrictEqual(await Monitor.getMonitorOwner([]), []);
+        });
+    });
+
     describe("deleting users", () => {
         test("a user cannot delete their own account", async () => {
             const admin = await makeUser("admin", ROLE_ADMIN);

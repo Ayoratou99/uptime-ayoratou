@@ -124,10 +124,16 @@ class Monitor extends BeanModel {
         const path = preloadData.paths.get(this.id) || [];
         const pathName = path.join(" / ");
 
+        // Who created this monitor. `owner` is null when the creator has since
+        // been deleted, in which case the UI shows the monitor as unowned.
+        const owner = preloadData.owners?.get(this.id) ?? null;
+
         let data = {
             id: this.id,
             name: this.name,
             description: this.description,
+            userID: this.user_id,
+            owner: owner && owner.userID ? owner : null,
             path,
             pathName,
             parent: this.parent,
@@ -1830,11 +1836,13 @@ class Monitor extends BeanModel {
         const activeStatusMap = new Map();
         const forceInactiveMap = new Map();
         const pathsMap = new Map();
+        const ownersMap = new Map();
 
         if (monitorData.length > 0) {
             const monitorIDs = monitorData.map((monitor) => monitor.id);
             const notifications = await Monitor.getMonitorNotification(monitorIDs);
             const tags = await Monitor.getMonitorTag(monitorIDs);
+            const owners = await Monitor.getMonitorOwner(monitorIDs);
             const maintenanceStatuses = await Promise.all(
                 monitorData.map((monitor) => Monitor.isUnderMaintenance(monitor.id))
             );
@@ -1886,6 +1894,16 @@ class Monitor extends BeanModel {
             monitorData.forEach((monitor, index) => {
                 pathsMap.set(monitor.id, paths[index]);
             });
+
+            owners.forEach((row) => {
+                ownersMap.set(row.monitor_id, {
+                    userID: row.user_id,
+                    // A monitor whose owner was deleted keeps its row but loses
+                    // the join, so both of these can be null.
+                    username: row.username ?? null,
+                    displayName: row.display_name ?? null,
+                });
+            });
         }
 
         return {
@@ -1896,7 +1914,29 @@ class Monitor extends BeanModel {
             activeStatus: activeStatusMap,
             forceInactive: forceInactiveMap,
             paths: pathsMap,
+            owners: ownersMap,
         };
+    }
+
+    /**
+     * Look up the owning user of several monitors in one query.
+     * @param {number[]} monitorIDs IDs of the monitors.
+     * @returns {Promise<LooseObject<any>[]>} Rows of monitor_id, user_id, username, display_name.
+     */
+    static async getMonitorOwner(monitorIDs) {
+        if (!monitorIDs.length) {
+            return [];
+        }
+        const placeholders = monitorIDs.map(() => "?").join(",");
+        // `user` is backtick-quoted to match the rest of the codebase; it is a
+        // keyword in some dialects and both SQLite and MariaDB accept backticks.
+        return await R.getAll(
+            `SELECT monitor.id AS monitor_id, \`user\`.id AS user_id, \`user\`.username, \`user\`.display_name
+             FROM monitor
+             LEFT JOIN \`user\` ON \`user\`.id = monitor.user_id
+             WHERE monitor.id IN (${placeholders})`,
+            monitorIDs
+        );
     }
 
     /**
