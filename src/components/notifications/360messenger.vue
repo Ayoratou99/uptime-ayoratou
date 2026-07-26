@@ -117,7 +117,7 @@ export default {
         Whatsapp360messengerTemplatedTextareaPlaceholder() {
             return this.$t("Example:", [
                 `
-Uptime Kuma Alert{% if monitorJSON %} - {{ monitorJSON['name'] }}{% endif %}
+Ayoratou Alert{% if monitorJSON %} - {{ monitorJSON['name'] }}{% endif %}
 
 {{ msg }}
                 `,

@@ -80,7 +80,7 @@ class StatusPage extends BeanModel {
         const { incidents, heartbeats, statusDescription } = await StatusPage.getRSSPageData(statusPage);
 
         // Use custom RSS title if set, otherwise fall back to status page title
-        let feedTitle = "Uptime Kuma RSS Feed";
+        let feedTitle = "Ayoratou RSS Feed";
         if (statusPage.rss_title) {
             feedTitle = statusPage.rss_title;
         } else if (statusPage.title) {

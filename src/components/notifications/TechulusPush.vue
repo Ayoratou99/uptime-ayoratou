@@ -80,7 +80,7 @@ export default {
     },
     mounted() {
         if (typeof this.$parent.notification.pushTitle === "undefined") {
-            this.$parent.notification.pushTitle = "Uptime-Kuma";
+            this.$parent.notification.pushTitle = "Ayoratou";
         }
         if (typeof this.$parent.notification.pushChannel === "undefined") {
             this.$parent.notification.pushChannel = "uptime-kuma";

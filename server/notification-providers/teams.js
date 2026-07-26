@@ -69,7 +69,7 @@ class Teams extends NotificationProvider {
         if (dashboardUrl) {
             actions.push({
                 type: "Action.OpenUrl",
-                title: "Visit Uptime Kuma",
+                title: "Visit Ayoratou",
                 url: dashboardUrl,
             });
         }
@@ -127,7 +127,7 @@ class Teams extends NotificationProvider {
                                         width: "32px",
                                         style: "Person",
                                         url: "https://raw.githubusercontent.com/louislam/uptime-kuma/master/public/icon.png",
-                                        altText: "Uptime Kuma Logo",
+                                        altText: "Ayoratou Logo",
                                     },
                                 ],
                             },
@@ -145,7 +145,7 @@ class Teams extends NotificationProvider {
                                         type: "TextBlock",
                                         size: "Small",
                                         weight: "Default",
-                                        text: "Uptime Kuma Alert",
+                                        text: "Ayoratou Alert",
                                         isSubtle: true,
                                         spacing: "None",
                                     },

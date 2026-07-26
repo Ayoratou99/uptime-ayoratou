@@ -596,7 +596,7 @@
     "Domain": "اِختِصاص",
     "Workstation": "محطة العمل",
     "disableCloudflaredNoAuthMsg": "أنت في وضع مصادقة لا توجد كلمة مرور غير مطلوبة.",
-    "trustProxyDescription": "ثق في رؤوس \"X-Forwarded- *\". إذا كنت ترغب في الحصول على عنوان IP الصحيح للعميل وكان Uptime Kuma خلف وكيل مثل Nginx أو Apache ، فيجب عليك تمكين هذا.",
+    "trustProxyDescription": "ثق في رؤوس \"X-Forwarded- *\". إذا كنت ترغب في الحصول على عنوان IP الصحيح للعميل وكان Ayoratou خلف وكيل مثل Nginx أو Apache ، فيجب عليك تمكين هذا.",
     "wayToGetLineNotifyToken": "يمكنك الحصول على رمز الوصول من {0}",
     "Examples": "أمثلة",
     "Home Assistant URL": "Home Assistant URL",
