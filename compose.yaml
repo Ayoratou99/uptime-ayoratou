@@ -1,10 +1,8 @@
+name: Ayoratou
+
 services:
-  uptime-ayoratou:
-    container_name: uptime-ayoratou
+  uptime:
     image: ayoratou99/uptime-ayoratou:latest
-    # Builds from this repo so local changes (including the frontend in ./dist)
-    # are baked into the image. Run `npm run build` first.
-    # Drop the `build:` block to run the published image instead.
     build:
       context: .
       dockerfile: docker/dockerfile
@@ -13,5 +11,4 @@ services:
     volumes:
       - ./data:/app/data
     ports:
-      # <Host Port>:<Container Port>
       - "3001:3001"
