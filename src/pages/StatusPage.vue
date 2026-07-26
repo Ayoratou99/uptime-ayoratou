@@ -542,11 +542,32 @@
 
             <!-- Past Incidents -->
             <div v-if="pastIncidentCount > 0" class="past-incidents-section mb-4">
-                <h2 class="past-incidents-title mb-3">
-                    {{ $t("Past Incidents") }}
-                </h2>
+                <div class="past-incidents-heading mb-3">
+                    <h2 class="past-incidents-title mb-0">
+                        {{ $t("Past Incidents") }}
+                    </h2>
+                    <button class="btn btn-outline-secondary btn-sm" type="button" @click="toggleBrowseAll">
+                        <font-awesome-icon :icon="browseAllIncidents ? 'chevron-up' : 'list'" />
+                        {{ browseAllIncidents ? $t("backToRecent") : $t("seeAllIncidents") }}
+                    </button>
+                </div>
 
-                <div class="past-incidents-content">
+                <!-- Full browse view: search, filter and export across every
+                     loaded incident, rather than the date-grouped recent list. -->
+                <div v-if="browseAllIncidents" class="shadow-box incident-list-box">
+                    <IncidentBrowser :incidents="incidentHistory" :loading="incidentHistoryLoading" :slug="slug" />
+                    <div v-if="incidentHistoryHasMore" class="d-flex justify-content-center pb-3">
+                        <button
+                            class="btn btn-outline-secondary btn-sm"
+                            :disabled="incidentHistoryLoading"
+                            @click="loadMoreIncidentHistory"
+                        >
+                            {{ $t("loadMoreForSearch") }}
+                        </button>
+                    </div>
+                </div>
+
+                <div v-else class="past-incidents-content">
                     <div
                         v-for="(dateGroup, dateKey) in groupedIncidentHistory"
                         :key="dateKey"
@@ -668,6 +689,7 @@ import IncidentManageModal from "../components/IncidentManageModal.vue";
 import IncidentEditForm from "../components/IncidentEditForm.vue";
 import IncidentTimeline from "../components/IncidentTimeline.vue";
 import StatusPageSubscribe from "../components/StatusPageSubscribe.vue";
+import IncidentBrowser from "../components/IncidentBrowser.vue";
 import { getResBaseURL } from "../util-frontend";
 import {
     STATUS_PAGE_ALL_DOWN,
@@ -707,6 +729,7 @@ export default {
         IncidentEditForm,
         IncidentTimeline,
         StatusPageSubscribe,
+        IncidentBrowser,
     },
 
     // Leave Page for vue route change
@@ -743,6 +766,7 @@ export default {
             selectedMonitor: null,
             incident: null,
             /** Incident currently having an update composed for it, if any. */
+            browseAllIncidents: false,
             updatingIncidentID: null,
             incidentUpdate: {
                 status: "identified",
@@ -1643,6 +1667,20 @@ export default {
         },
 
         /**
+         * Switch between the recent date-grouped list and the full browse view.
+         *
+         * The browser filters what is already loaded, so entering it pulls in
+         * the rest of the history rather than searching a partial set.
+         * @returns {void}
+         */
+        toggleBrowseAll() {
+            this.browseAllIncidents = !this.browseAllIncidents;
+            if (this.browseAllIncidents && this.incidentHistoryHasMore && !this.incidentHistoryLoading) {
+                this.loadMoreIncidentHistory();
+            }
+        },
+
+        /**
          * Open the update composer for an incident.
          * @param {object} incident Incident being updated.
          * @returns {void}
@@ -2048,6 +2086,14 @@ footer {
 .past-incidents-title {
     font-size: 26px;
     font-weight: normal;
+}
+
+.past-incidents-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
 }
 
 .past-incidents-section {

@@ -794,6 +794,9 @@ let needSetup = false;
                     bean.retry_only_on_status_code_failure = monitor.retryOnlyOnStatusCodeFailure;
                 }
                 bean.user_id = socket.userID;
+                // Set explicitly rather than relying on import() to translate
+                // the camelCase field, as is done for the edit path.
+                bean.auto_incident_minutes = Number(monitor.autoIncidentMinutes) || 0;
 
                 bean.validate();
 
@@ -883,6 +886,7 @@ let needSetup = false;
                 bean.interval = monitor.interval;
                 bean.retryInterval = monitor.retryInterval;
                 bean.resendInterval = monitor.resendInterval;
+                bean.auto_incident_minutes = Number(monitor.autoIncidentMinutes) || 0;
                 bean.hostname = monitor.hostname;
                 bean.game = monitor.game;
                 bean.maxretries = monitor.maxretries;

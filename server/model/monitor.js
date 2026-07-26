@@ -54,6 +54,7 @@ const { ROOM_VIEW_ALL_MONITORS } = require("../socket-permissions");
 const { ConditionExpressionGroup } = require("../monitor-conditions/expression");
 const { evaluateExpressionGroup } = require("../monitor-conditions/evaluator");
 const statusPageMailer = require("../status-page-mailer");
+const autoIncident = require("../auto-incident");
 const { DockerHost } = require("../docker");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
@@ -160,6 +161,7 @@ class Monitor extends BeanModel {
             retryInterval: this.retryInterval,
             retryOnlyOnStatusCodeFailure: Boolean(this.retry_only_on_status_code_failure),
             resendInterval: this.resendInterval,
+            autoIncidentMinutes: this.auto_incident_minutes,
             keyword: this.keyword,
             invertKeyword: this.isInvertKeyword(),
             expiryNotification: this.isEnabledExpiryNotification(),
@@ -1070,6 +1072,11 @@ class Monitor extends BeanModel {
                     `Monitor #${this.id} '${this.name}': Failing: ${bean.msg} | Interval: ${beatInterval} seconds | Type: ${this.type} | Down Count: ${bean.downCount} | Resend Interval: ${this.resendInterval}`
                 );
             }
+
+            // Open or close an automatic incident if this monitor is configured
+            // for one. Not awaited: status page bookkeeping must not delay the
+            // next beat, and the module swallows its own failures.
+            autoIncident.handleHeartbeat(this, bean.status === DOWN).catch((e) => log.warn("auto-incident", e.message));
 
             // Calculate uptime
             let uptimeCalculator = await UptimeCalculator.getUptimeCalculator(this.id);

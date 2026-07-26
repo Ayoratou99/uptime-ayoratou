@@ -1679,6 +1679,26 @@
                                 />
                             </div>
 
+                            <!-- Automatic incident after sustained downtime -->
+                            <div class="my-3">
+                                <label for="auto-incident-minutes" class="form-label">
+                                    {{ $t("autoIncident") }}
+                                </label>
+                                <select
+                                    id="auto-incident-minutes"
+                                    v-model.number="monitor.autoIncidentMinutes"
+                                    class="form-select"
+                                >
+                                    <option :value="0">{{ $t("autoIncidentOff") }}</option>
+                                    <option :value="5">{{ $t("autoIncidentAfter", { minutes: 5 }) }}</option>
+                                    <option :value="10">{{ $t("autoIncidentAfter", { minutes: 10 }) }}</option>
+                                    <option :value="15">{{ $t("autoIncidentAfter", { minutes: 15 }) }}</option>
+                                    <option :value="30">{{ $t("autoIncidentAfter", { minutes: 30 }) }}</option>
+                                    <option :value="60">{{ $t("autoIncidentAfter", { minutes: 60 }) }}</option>
+                                </select>
+                                <div class="form-text">{{ $t("autoIncidentDescription") }}</div>
+                            </div>
+
                             <h2 v-if="monitor.type !== 'push'" class="mt-5 mb-2">{{ $t("Advanced") }}</h2>
 
                             <div
@@ -3274,6 +3294,7 @@ const monitorDefaults = {
     humanReadableInterval: timeDurationFormatter.secondsToHumanReadableFormat(60),
     retryInterval: 60,
     resendInterval: 0,
+    autoIncidentMinutes: 0,
     maxretries: 0,
     retryOnlyOnStatusCodeFailure: false,
     notificationIDList: {},

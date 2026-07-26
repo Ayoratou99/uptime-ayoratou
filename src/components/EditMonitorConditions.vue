@@ -1,6 +1,13 @@
 <template>
     <div class="monitor-conditions">
-        <label class="form-label">{{ $t("Conditions") }}</label>
+        <label class="form-label mb-1">{{ $t("Conditions") }}</label>
+        <p class="conditions-help">{{ $t("conditionsHelp") }}</p>
+
+        <!-- Without this the section reads as an unexplained pair of buttons -->
+        <div v-if="model.length === 0" class="conditions-empty">
+            {{ $t("conditionsEmpty") }}
+        </div>
+
         <div class="monitor-conditions-conditions">
             <template v-for="(condition, conditionIndex) in model" :key="conditionIndex">
                 <EditMonitorConditionGroup
@@ -29,6 +36,7 @@
                 data-testid="add-condition-button"
                 @click="addCondition"
             >
+                <font-awesome-icon icon="plus" />
                 {{ $t("conditionAdd") }}
             </button>
             <button
@@ -138,6 +146,21 @@ export default {
 .monitor-conditions,
 .monitor-conditions-conditions {
     container-type: inline-size;
+}
+
+.conditions-help {
+    font-size: 13px;
+    color: $secondary-text;
+    margin-bottom: 10px;
+}
+
+.conditions-empty {
+    font-size: 14px;
+    color: $secondary-text;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    border: 1px dashed rgba(128, 128, 128, 0.4);
+    border-radius: 8px;
 }
 
 .monitor-conditions-buttons {
