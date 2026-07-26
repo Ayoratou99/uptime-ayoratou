@@ -1,203 +1,241 @@
 <div align="center" width="100%">
-    <img src="./public/icon.svg" width="128" alt="Uptime Kuma Logo" />
+    <img src="./public/icon.svg" width="128" alt="Ayoratou Logo" />
 </div>
 
-# Uptime Kuma
+# Uptime Ayoratou
 
-Uptime Kuma is an easy-to-use self-hosted monitoring tool.
+Self-hosted monitoring and public status pages.
 
-<a target="_blank" href="https://github.com/louislam/uptime-kuma"><img src="https://img.shields.io/github/stars/louislam/uptime-kuma?style=flat" /></a> <a target="_blank" href="https://hub.docker.com/r/louislam/uptime-kuma"><img src="https://img.shields.io/docker/pulls/louislam/uptime-kuma" /></a> <a target="_blank" href="https://hub.docker.com/r/louislam/uptime-kuma"><img src="https://img.shields.io/docker/v/louislam/uptime-kuma/2?label=docker%20image%20ver." /></a> <a target="_blank" href="https://github.com/louislam/uptime-kuma"><img src="https://img.shields.io/github/last-commit/louislam/uptime-kuma" /></a> <a target="_blank" href="https://opencollective.com/uptime-kuma"><img src="https://opencollective.com/uptime-kuma/total/badge.svg?label=Open%20Collective%20Backers&color=brightgreen" /></a>
-[![GitHub Sponsors](https://img.shields.io/github/sponsors/louislam?label=GitHub%20Sponsors)](https://github.com/sponsors/louislam) <a href="https://weblate.kuma.pet/projects/uptime-kuma/uptime-kuma/">
-<img src="https://weblate.kuma.pet/widgets/uptime-kuma/-/svg-badge.svg" alt="Translation status" />
-</a>
+<a target="_blank" href="https://hub.docker.com/r/ayoratou99/uptime-ayoratou"><img src="https://img.shields.io/docker/pulls/ayoratou99/uptime-ayoratou" alt="Docker pulls" /></a>
+<a target="_blank" href="https://hub.docker.com/r/ayoratou99/uptime-ayoratou"><img src="https://img.shields.io/docker/v/ayoratou99/uptime-ayoratou?label=docker%20image%20ver." alt="Docker image version" /></a>
+<img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT licence" />
 
-<img src="https://user-images.githubusercontent.com/1336778/212262296-e6205815-ad62-488c-83ec-a5b0d0689f7c.jpg" width="700" alt="Uptime Kuma Dashboard Screenshot" />
+---
 
-## 🥔 Live Demo
+## About this project
 
-Try it!
+**Uptime Ayoratou is a proposal version by MVONE AYORATOU Arthur.**
 
-Demo Server (Location: Frankfurt - Germany): <https://demo.kuma.pet/start-demo>
+It is built on [Uptime Kuma](https://github.com/louislam/uptime-kuma), the
+self-hosted monitoring tool created and maintained by
+[Louis Lam](https://github.com/louislam). All of the original work, and the
+overwhelming majority of the code here, is theirs. This fork keeps the MIT
+licence and exists to add features for a specific set of needs, not to compete
+with or replace the original.
 
-It is a temporary live demo, all data will be deleted after 10 minutes. Sponsored by [Uptime Kuma Sponsors](https://github.com/louislam/uptime-kuma#%EF%B8%8F-sponsors).
+If you want the original project, go there — it is actively maintained and has
+a large community behind it:
 
-## ⭐ Features
+- Upstream repository: https://github.com/louislam/uptime-kuma
+- Upstream documentation and wiki: https://github.com/louislam/uptime-kuma/wiki
+- Upstream live demo: https://demo.kuma.pet/start-demo
 
-- Monitoring uptime for HTTP(s) / TCP / HTTP(s) Keyword / HTTP(s) Json Query / Websocket / Ping / DNS Record / Push / Steam Game Server / Docker Containers
-- Fancy, Reactive, Fast UI/UX
-- Notifications via Telegram, Discord, Gotify, Slack, Pushover, Email (SMTP), and [90+ notification services, click here for the full list](https://github.com/louislam/uptime-kuma/tree/master/src/components/notifications)
-- 20-second intervals
-- [Multi Languages](https://github.com/louislam/uptime-kuma/tree/master/src/lang)
-- Multiple status pages
-- Map status pages to specific domains
-- Ping chart
-- Certificate info
-- Proxy support
-- 2FA support
+For anything not described below, the upstream documentation applies unchanged.
 
-## 🔧 How to Install
+---
 
-### 🐳 Docker Compose
+## What this fork adds
+
+Everything Uptime Kuma does, plus the following.
+
+### Multiple users with real permissions
+
+Upstream supports a single administrator. This fork adds accounts with three
+roles (admin, editor, viewer) and **per-user permission overrides** on top of
+the role, so you can say "this editor may also edit everyone else's monitors"
+without promoting them to an administrator.
+
+Sixteen permissions cover monitors, status pages, maintenance, notifications,
+settings and user management, each with `own` and `all` variants. The last
+active administrator cannot be deleted, disabled or demoted, so an installation
+cannot lock itself out.
+
+### Mandatory two-factor authentication
+
+TOTP (Google Authenticator and compatible apps) is **required for every
+account**. A correct password proves who you are but does not create a session:
+until an authenticator code confirms enrolment, there is no login. Users cannot
+turn their own 2FA off.
+
+Administrators can reset any user's 2FA from Settings → Users. That signs the
+user out and makes them scan a new code at their next login, which is the
+recovery path for a lost device.
+
+### Richer HTTP checks
+
+Upstream lets an HTTP monitor check the status code, or match one keyword, or
+run one JSON query. This fork lets you combine assertions about the response
+itself with AND/OR:
+
+| Variable                 | Checks                                       |
+| ------------------------ | -------------------------------------------- |
+| `status code`            | numeric comparison                           |
+| `response time (ms)`     | numeric comparison                           |
+| `content type`           | string comparison — how you require JSON     |
+| `response body`          | string comparison, plus regex                |
+| `response size (bytes)`  | numeric comparison                           |
+| `response is valid JSON` | yes/no, decided by actually parsing the body |
+
+Regex accepts either a bare pattern or `/pattern/flags`, so case-insensitive
+and dotall matching are reachable. An invalid pattern reports itself by name
+rather than surfacing a raw `SyntaxError` from the check.
+
+### Incident history that is actually history
+
+Upstream overwrites an incident when you post a follow-up, losing the earlier
+text. Here each change is appended to a timeline with a status
+(investigating → identified → monitoring → resolved), a timestamp and an
+author, and the full history is shown on the public page.
+
+Incidents on the status page are collapsible, and a **See all incidents** view
+adds search across titles, bodies and timeline updates, filters by status,
+ongoing/past and date range, and CSV/JSON export.
+
+### Automatic incidents for sustained downtime
+
+A monitor can post an incident automatically once it has been down continuously
+for 5, 10, 15, 30 or 60 minutes. The delay is the point: a brief blip should not
+put a notice in front of the public.
+
+**Automatic incidents are never closed automatically.** A monitor coming back
+means the check passes again, not that the problem is understood or that your
+users have been given an explanation, so updating and resolving stay with
+whoever is handling it.
+
+### Public email subscriptions
+
+Visitors can subscribe to a status page and be emailed about incidents, updates
+and monitor state changes. Subscription is double opt-in — a confirmation link
+must be opened before anything is delivered — and every message carries a
+one-click unsubscribe link.
+
+SMTP is configured once for the whole instance under
+Settings → Status Page Email, separately from monitor notifications, with a
+"send test email" button to check it before you rely on it.
+
+### AyosPush WhatsApp notifications
+
+An additional notification provider that sends approved WhatsApp template
+messages through AyosPush. It appears under chat platforms as
+_WhatsApp (AyosPush)_.
+
+### Smaller changes
+
+- Monitors show who created them
+- Redesigned status page header: overall state, how many services are
+  operational, and how fresh the page is
+- The interface is rebranded throughout, including all 78 translations
+
+---
+
+## Install
+
+### Docker Compose
 
 ```bash
-mkdir uptime-kuma
-cd uptime-kuma
-curl -o compose.yaml https://raw.githubusercontent.com/louislam/uptime-kuma/master/compose.yaml
+mkdir uptime-ayoratou
+cd uptime-ayoratou
+curl -o compose.yaml https://raw.githubusercontent.com/Ayoratou99/uptime-ayoratou/ayoratou/compose.yaml
 docker compose up -d
 ```
 
-Uptime Kuma is now running on all network interfaces (e.g. http://localhost:3001 or http://your-ip:3001).
+`compose.yaml` in this repository builds the image from source. To run the
+published image instead, remove the `build:` block so only `image:` remains. If
+you do build locally, run `npm run build` first — the frontend is baked into
+the image.
 
-> [!WARNING]
-> File Systems like **NFS** (Network File System) are **NOT** supported. Please map to a local directory or volume.
-
-### 🐳 Docker Command
+### Docker
 
 ```bash
-docker run -d --restart=always -p 3001:3001 -v uptime-kuma:/app/data --name uptime-kuma louislam/uptime-kuma:2
+docker run -d --restart=always -p 3001:3001 -v uptime-ayoratou:/app/data --name uptime-ayoratou ayoratou99/uptime-ayoratou:latest
 ```
 
-Uptime Kuma is now running on all network interfaces (e.g. http://localhost:3001 or http://your-ip:3001).
+It listens on all interfaces, for example http://localhost:3001.
 
-If you want to limit exposure to localhost only:
+To expose it to localhost only:
 
 ```bash
-docker run ... -p 127.0.0.1:3001:3001 ...
+docker run -d --restart=always -p 127.0.0.1:3001:3001 -v uptime-ayoratou:/app/data --name uptime-ayoratou ayoratou99/uptime-ayoratou:latest
 ```
 
-### 💪🏻 Non-Docker
+> **Warning**
+> Network file systems such as NFS are not supported for the data directory.
+> Map a local directory or a Docker volume.
 
-Requirements:
+### Without Docker
 
-- Platform
-  - ✅ Major Linux distros such as Debian, Ubuntu, Fedora and ArchLinux etc.
-  - ✅ Windows 10 (x64), Windows Server 2012 R2 (x64) or higher
-  - ❌ FreeBSD / OpenBSD / NetBSD
-  - ❌ Replit / Heroku
-- [Node.js](https://nodejs.org/en/download/) >= 20.4
-- [Git](https://git-scm.com/downloads)
-- [pm2](https://pm2.keymetrics.io/) - For running Uptime Kuma in the background
+Requirements are unchanged from upstream: Node.js >= 20.4, Git, and
+[pm2](https://pm2.keymetrics.io/) to run it in the background. Major Linux
+distributions and Windows 10 / Server 2012 R2 or newer are supported;
+FreeBSD, OpenBSD and NetBSD are not.
 
 ```bash
-git clone https://github.com/louislam/uptime-kuma.git
-cd uptime-kuma
-npm run setup
+git clone https://github.com/Ayoratou99/uptime-ayoratou.git
+cd uptime-ayoratou
+git checkout ayoratou
+npm ci
+npm run build
 
-# Option 1. Try it
+# Try it
 node server/server.js
 
-# (Recommended) Option 2. Run in the background using PM2
-# Install PM2 if you don't have it:
+# Or run it in the background
 npm install pm2 -g && pm2 install pm2-logrotate
-
-# Start Server
-pm2 start server/server.js --name uptime-kuma
-```
-
-Uptime Kuma is now running on all network interfaces (e.g. http://localhost:3001 or http://your-ip:3001).
-
-More useful PM2 Commands
-
-```bash
-# If you want to see the current console output
-pm2 monit
-
-# If you want to add it to startup
+pm2 start server/server.js --name uptime-ayoratou
 pm2 startup && pm2 save
 ```
 
-### Advanced Installation
+### First run
 
-If you need more options or need to browse via a reverse proxy, please read:
+1. Choose a database. SQLite is fine for most installations.
+2. Create the first administrator account.
+3. **Scan the QR code with your authenticator app** and enter the six digit
+   code. Two-factor authentication is mandatory, so this step cannot be
+   skipped — keep the device handy.
 
-<https://github.com/louislam/uptime-kuma/wiki/%F0%9F%94%A7-How-to-Install>
+---
 
-## 🆙 How to Update
+## Screenshots
 
-Please read:
+Screenshots have not been captured for this fork yet. The upstream images show
+the original interface, so they are deliberately not reused here: they would
+misrepresent what this version actually looks like.
 
-<https://github.com/louislam/uptime-kuma/wiki/%F0%9F%86%99-How-to-Update>
+To add your own, put them in `docs/screenshots/` and reference them:
 
-## 🆕 What's Next?
+```markdown
+![Dashboard](./docs/screenshots/dashboard.png)
+![Status page](./docs/screenshots/status-page.png)
+![Users and permissions](./docs/screenshots/users.png)
+![Monitor conditions](./docs/screenshots/conditions.png)
+![Incident timeline](./docs/screenshots/incident-timeline.png)
+```
 
-I will assign requests/issues to the next milestone.
+---
 
-<https://github.com/louislam/uptime-kuma/milestones>
+## Credits and licence
 
-## ❤️ Sponsors
+Uptime Kuma is © Louis Lam and its contributors, released under the MIT
+licence. This fork is released under the same licence, reproduced unchanged in
+[LICENSE](./LICENSE).
 
-Thank you so much! (GitHub Sponsors will be updated manually. OpenCollective sponsors will be updated automatically, the list will be cached by GitHub though. It may need some time to be updated)
+If you find this useful, please consider starring
+[the original project](https://github.com/louislam/uptime-kuma) — it is the
+reason this exists.
 
-<img src="https://uptime.kuma.pet/sponsors?v=6" alt="Uptime Kuma Sponsors" />
+### Support
 
-## 🖼 More Screenshots
+This fork is a personal proposal and carries no support commitment. For
+questions about the underlying product, the upstream community is the right
+place:
 
-Light Mode:
+- [Upstream issues](https://github.com/louislam/uptime-kuma/issues)
+- [r/UptimeKuma](https://www.reddit.com/r/UptimeKuma/)
 
-<img src="https://uptime.kuma.pet/img/light.jpg" width="512" alt="Uptime Kuma Light Mode Screenshot of how the Dashboard looks" />
-
-Status Page:
-
-<img src="https://user-images.githubusercontent.com/1336778/134628766-a3fe0981-0926-4285-ab46-891a21c3e4cb.png" width="512" alt="Uptime Kuma Status Page Screenshot" />
-
-Settings Page:
-
-<img src="https://louislam.net/uptimekuma/2.jpg" width="400" alt="Uptime Kuma Settings Page Screenshot" />
-
-Telegram Notification Sample:
-
-<img src="https://louislam.net/uptimekuma/3.jpg" width="400" alt="Uptime Kuma Telegram Notification Sample Screenshot" />
-
-## Motivation
-
-- I was looking for a self-hosted monitoring tool like "Uptime Robot", but it is hard to find a suitable one. One of the closest ones is statping. Unfortunately, it is not stable and no longer maintained.
-- Wanted to build a fancy UI.
-- Learn Vue 3 and vite.js.
-- Show the power of Bootstrap 5.
-- Try to use WebSocket with SPA instead of a REST API.
-- Deploy my first Docker image to Docker Hub.
-
-If you love this project, please consider giving it a ⭐.
-
-## 🗣️ Discussion / Ask for Help
-
-⚠️ For any general or technical questions, please don't send me an email, as I am unable to provide support in that manner. I will not respond if you ask questions there.
-
-I recommend using Google, GitHub Issues, or Uptime Kuma's subreddit for finding answers to your question. If you cannot find the information you need, feel free to ask:
-
-- [GitHub Issues](https://github.com/louislam/uptime-kuma/issues)
-- [Subreddit (r/UptimeKuma)](https://www.reddit.com/r/UptimeKuma/)
-
-My Reddit account: [u/louislamlam](https://reddit.com/u/louislamlam)
-You can mention me if you ask a question on the subreddit.
-
-## Contributions
-
-### Create Pull Requests
-
-Pull requests are awesome.
-To keep reviews fast and effective, please make sure you’ve [read our pull request guidelines](https://github.com/louislam/uptime-kuma/blob/master/CONTRIBUTING.md#can-i-create-a-pull-request-for-uptime-kuma).
-
-### Test Pull Requests
-
-There are a lot of pull requests right now, but I don't have time to test them all.
-
-If you want to help, you can check this:
-<https://github.com/louislam/uptime-kuma/wiki/Test-Pull-Requests>
-
-### Test Beta Version
-
-Check out the latest beta release here: <https://github.com/louislam/uptime-kuma/releases>
-
-### Bug Reports / Feature Requests
-
-If you want to report a bug or request a new feature, feel free to open a [new issue](https://github.com/louislam/uptime-kuma/issues).
+Please do not raise issues about this fork with the upstream maintainers.
 
 ### Translations
 
-If you want to translate Uptime Kuma into your language, please visit [Weblate Readme](https://github.com/louislam/uptime-kuma/blob/master/src/lang/README.md).
-
-### Spelling & Grammar
-
-Feel free to correct the grammar in the documentation or code.
-My mother language is not English and my grammar is not that great.
+Translations come from upstream and are managed through
+[Weblate](https://weblate.kuma.pet/projects/uptime-kuma/uptime-kuma/).
+Contribute them there so the whole community benefits, rather than here.
