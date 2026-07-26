@@ -29,7 +29,9 @@ RUN mkdir ./data
 FROM $BASE_IMAGE AS release
 WORKDIR /app
 
-LABEL org.opencontainers.image.source="https://github.com/louislam/uptime-kuma"
+LABEL org.opencontainers.image.title="Uptime Ayoratou"
+LABEL org.opencontainers.image.description="Self-hosted monitoring and status pages"
+LABEL org.opencontainers.image.source="https://github.com/Ayoratou99/uptime-ayoratou"
 
 ENV UPTIME_KUMA_IS_CONTAINER=1
 
