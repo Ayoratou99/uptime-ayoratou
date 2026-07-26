@@ -77,6 +77,17 @@ export default {
             beatHoverAreaPadding: 4,
             move: false,
             maxBeat: -1,
+
+            // Ripple shown when a new check lands. Null progress means at rest.
+            rippleProgress: null,
+            rippleStart: 0,
+            rippleFrame: null,
+            /** How long the whole wave takes to cross the bars, in ms. */
+            rippleDuration: 700,
+            /** How many bars back the wave is still visible. */
+            rippleReach: 12,
+            /** Peak extra scale at the wave's crest. */
+            rippleAmplitude: 0.45,
             // Tooltip data
             tooltipVisible: false,
             tooltipContent: null,
@@ -306,7 +317,15 @@ export default {
             deep: true,
         },
 
-        shortBeatList() {
+        shortBeatList(to, from) {
+            // A new check produces a longer list, or a different newest beat.
+            // Ripple only then, not on resize or maxBeat changes, which also
+            // retrigger this watcher.
+            const newestChanged = to.length !== from?.length || to[to.length - 1] !== from?.[from.length - 1];
+            if (newestChanged) {
+                this.startRipple();
+            }
+
             // Triggers on beatList, maxBeat, or move changes
             this.$nextTick(() => {
                 this.drawCanvas();
@@ -329,6 +348,11 @@ export default {
         // Clean up tooltip timeout
         if (this.tooltipTimeoutId) {
             clearTimeout(this.tooltipTimeoutId);
+        }
+        // Stop the ripple, otherwise it keeps drawing to a detached canvas.
+        if (this.rippleFrame) {
+            cancelAnimationFrame(this.rippleFrame);
+            this.rippleFrame = null;
         }
     },
     beforeMount() {
@@ -534,6 +558,77 @@ export default {
          * Draw all beats on the canvas
          * @returns {void}
          */
+        /**
+         * Run a ripple across the bars after a new check.
+         *
+         * Each bar's scale peaks a little later than the one to its right, so
+         * the effect reads as a wave travelling back through the history from
+         * the newest beat. Driven by requestAnimationFrame rather than CSS,
+         * because the bars are drawn on a canvas.
+         * @returns {void}
+         */
+        startRipple() {
+            // Honour the OS setting: this is decoration, not information.
+            if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+                return;
+            }
+
+            if (this.rippleFrame) {
+                cancelAnimationFrame(this.rippleFrame);
+            }
+
+            this.rippleStart = performance.now();
+
+            const step = () => {
+                const elapsed = performance.now() - this.rippleStart;
+
+                if (elapsed >= this.rippleDuration) {
+                    this.rippleProgress = null;
+                    this.rippleFrame = null;
+                    this.drawCanvas();
+                    return;
+                }
+
+                this.rippleProgress = elapsed;
+                this.drawCanvas();
+                this.rippleFrame = requestAnimationFrame(step);
+            };
+
+            this.rippleFrame = requestAnimationFrame(step);
+        },
+
+        /**
+         * Extra scale for one bar at the current point in the ripple.
+         * @param {number} index Bar index, left to right.
+         * @param {number} total Number of bars.
+         * @returns {number} Multiplier, 1 when the bar is at rest.
+         */
+        rippleScale(index, total) {
+            if (this.rippleProgress === null) {
+                return 1;
+            }
+
+            // Distance from the newest bar, which is the rightmost one.
+            const distance = total - 1 - index;
+
+            // The wave front moves left at a fixed rate; each bar responds for
+            // a short window as the front passes it.
+            const front = (this.rippleProgress / this.rippleDuration) * (this.rippleReach + 1);
+            const offset = front - distance;
+
+            if (offset < 0 || offset > 1) {
+                return 1;
+            }
+
+            // A single smooth hump, so bars grow and settle rather than snap.
+            const hump = Math.sin(offset * Math.PI);
+
+            // Bars further back move less, so the wave visibly decays.
+            const falloff = Math.max(0, 1 - distance / this.rippleReach);
+
+            return 1 + this.rippleAmplitude * hump * falloff;
+        },
+
         drawCanvas() {
             const canvas = this.$refs.canvas;
             if (!canvas) {
@@ -583,6 +678,17 @@ export default {
                     height *= this.hoverScale;
                     offsetX = x - (width - this.beatWidth) / 2;
                     offsetY = centerY - height / 2;
+                } else if (beat !== 0) {
+                    // Ripple after a new check. Skipped while hovered so the
+                    // hover scale stays the larger, deliberate effect, and
+                    // skipped for empty padding slots.
+                    const scale = this.rippleScale(index, this.shortBeatList.length);
+                    if (scale !== 1) {
+                        width *= scale;
+                        height *= scale;
+                        offsetX = x - (width - this.beatWidth) / 2;
+                        offsetY = centerY - height / 2;
+                    }
                 }
 
                 // Calculate border radius based on current width (pill shape = half of width)
