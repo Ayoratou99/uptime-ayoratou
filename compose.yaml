@@ -1,6 +1,12 @@
 services:
-  uptime-kuma:
-    image: louislam/uptime-kuma:2
+  ayoratou:
+    container_name: ayoratou
+    # Builds from this repo so local changes (including the rebranded frontend
+    # in ./dist) are baked into the image. Run `npm run build` first.
+    build:
+      context: .
+      dockerfile: docker/dockerfile
+      target: release
     restart: unless-stopped
     volumes:
       - ./data:/app/data
