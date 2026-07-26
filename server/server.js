@@ -150,6 +150,16 @@ const { apiAuth } = require("./auth");
 const { login } = require("./auth");
 const passwordHash = require("./password-hash");
 
+log.debug("server", "Importing Permissions");
+const { PERMISSIONS, hasPermission } = require("./permissions");
+const {
+    ROOM_VIEW_ALL_MONITORS,
+    getSocketUser,
+    requirePermission,
+    requireActOn,
+    canViewAllMonitors,
+} = require("./socket-permissions");
+
 const { Prometheus } = require("./prometheus");
 const { UptimeCalculator } = require("./uptime-calculator");
 
@@ -742,7 +752,7 @@ let needSetup = false;
         // Add a new monitor
         socket.on("add", async (monitor, callback) => {
             try {
-                checkLogin(socket);
+                await requirePermission(socket, PERMISSIONS.MONITOR_CREATE);
                 let bean = R.dispense("monitor");
 
                 let notificationIDList = monitor.notificationIDList;
@@ -818,13 +828,13 @@ let needSetup = false;
         socket.on("editMonitor", async (monitor, callback) => {
             try {
                 let removeGroupChildren = false;
-                checkLogin(socket);
 
-                let bean = await R.findOne("monitor", " id = ? ", [monitor.id]);
-
-                if (bean.user_id !== socket.userID) {
-                    throw new Error("Permission denied.");
-                }
+                let bean = await getEditableMonitor(
+                    socket,
+                    monitor.id,
+                    PERMISSIONS.MONITOR_EDIT_OWN,
+                    PERMISSIONS.MONITOR_EDIT_ALL
+                );
 
                 // Check if Parent is Descendant (would cause endless loop)
                 if (monitor.parent !== null) {
@@ -1014,7 +1024,7 @@ let needSetup = false;
 
                 log.info("monitor", `Get Monitor: ${monitorID} User ID: ${socket.userID}`);
 
-                let monitor = await R.findOne("monitor", " id = ? AND user_id = ? ", [monitorID, socket.userID]);
+                let monitor = await getViewableMonitor(socket, monitorID);
                 const monitorData = [{ id: monitor.id, active: monitor.active }];
                 const preloadData = await Monitor.preparePreloadData(monitorData);
                 callback({
@@ -1052,7 +1062,9 @@ let needSetup = false;
 
         socket.on("getMonitorBeats", async (monitorID, period, callback) => {
             try {
-                checkLogin(socket);
+                // Resolving the monitor also authorises it: without this any
+                // logged-in user could read heartbeats for any monitor by ID.
+                await getViewableMonitor(socket, monitorID);
 
                 log.info("monitor", `Get Monitor Beats: ${monitorID} User ID: ${socket.userID}`);
 
@@ -1088,8 +1100,13 @@ let needSetup = false;
         // Start or Resume the monitor
         socket.on("resumeMonitor", async (monitorID, callback) => {
             try {
-                checkLogin(socket);
-                await startMonitor(socket.userID, monitorID);
+                const monitor = await getEditableMonitor(
+                    socket,
+                    monitorID,
+                    PERMISSIONS.MONITOR_EDIT_OWN,
+                    PERMISSIONS.MONITOR_EDIT_ALL
+                );
+                await startMonitor(monitor.user_id, monitorID);
                 await server.sendUpdateMonitorIntoList(socket, monitorID);
 
                 callback({
@@ -1107,8 +1124,13 @@ let needSetup = false;
 
         socket.on("pauseMonitor", async (monitorID, callback) => {
             try {
-                checkLogin(socket);
-                await pauseMonitor(socket.userID, monitorID);
+                const monitor = await getEditableMonitor(
+                    socket,
+                    monitorID,
+                    PERMISSIONS.MONITOR_EDIT_OWN,
+                    PERMISSIONS.MONITOR_EDIT_ALL
+                );
+                await pauseMonitor(monitor.user_id, monitorID);
                 await server.sendUpdateMonitorIntoList(socket, monitorID);
 
                 callback({
@@ -1132,12 +1154,21 @@ let needSetup = false;
                     deleteChildren = false;
                 }
 
-                checkLogin(socket);
+                const monitor = await getEditableMonitor(
+                    socket,
+                    monitorID,
+                    PERMISSIONS.MONITOR_DELETE_OWN,
+                    PERMISSIONS.MONITOR_DELETE_ALL
+                );
+
+                // Users who may delete any monitor pass null so the delete is not
+                // restricted to rows they own -- a group's children may belong to
+                // someone else.
+                const deleteAsUserID = hasPermission(await getSocketUser(socket), PERMISSIONS.MONITOR_DELETE_ALL)
+                    ? null
+                    : socket.userID;
 
                 const startTime = Date.now();
-
-                // Check if this is a group monitor
-                const monitor = await R.findOne("monitor", " id = ? AND user_id = ? ", [monitorID, socket.userID]);
 
                 // Log with context about deletion type
                 if (monitor && monitor.type === "group") {
@@ -1158,7 +1189,7 @@ let needSetup = false;
                         // Delete all child monitors recursively
                         if (children && children.length > 0) {
                             for (const child of children) {
-                                await Monitor.deleteMonitorRecursively(child.id, socket.userID);
+                                await Monitor.deleteMonitorRecursively(child.id, deleteAsUserID);
                                 await server.sendDeleteMonitorFromList(socket, child.id);
                             }
                         }
@@ -1176,7 +1207,7 @@ let needSetup = false;
                 }
 
                 // Delete the monitor itself
-                await Monitor.deleteMonitor(monitorID, socket.userID);
+                await Monitor.deleteMonitor(monitorID, deleteAsUserID);
 
                 // Fix #2880
                 apicache.clear();
@@ -1819,6 +1850,47 @@ async function checkOwner(userID, monitorID) {
 }
 
 /**
+ * Resolve a monitor the socket's user is allowed to read.
+ *
+ * Owners always qualify; other users need `monitor.view.all` (which
+ * `monitor.edit.all` and `monitor.delete.all` imply).
+ * @param {Socket} socket Socket.io instance
+ * @param {number} monitorID ID of the monitor
+ * @returns {Promise<Bean>} The monitor bean
+ * @throws {Error} If the monitor does not exist or is not visible to the user
+ */
+async function getViewableMonitor(socket, monitorID) {
+    const user = await getSocketUser(socket);
+
+    const monitor = canViewAllMonitors(user)
+        ? await R.findOne("monitor", " id = ? ", [monitorID])
+        : await R.findOne("monitor", " id = ? AND user_id = ? ", [monitorID, socket.userID]);
+
+    if (!monitor) {
+        throw new Error("Monitor not found.");
+    }
+    return monitor;
+}
+
+/**
+ * Resolve a monitor the socket's user is allowed to modify.
+ * @param {Socket} socket Socket.io instance
+ * @param {number} monitorID ID of the monitor
+ * @param {string} ownPermission Permission covering monitors the user owns
+ * @param {string} allPermission Permission covering monitors owned by anyone
+ * @returns {Promise<Bean>} The monitor bean
+ * @throws {Error} If the monitor does not exist or the action is not allowed
+ */
+async function getEditableMonitor(socket, monitorID, ownPermission, allPermission) {
+    const monitor = await R.findOne("monitor", " id = ? ", [monitorID]);
+    if (!monitor) {
+        throw new Error("Monitor not found.");
+    }
+    await requireActOn(socket, ownPermission, allPermission, monitor.user_id);
+    return monitor;
+}
+
+/**
  * Function called after user login
  * This function is used to send the heartbeat list of a monitor.
  * @param {Socket} socket Socket.io instance
@@ -1828,6 +1900,13 @@ async function checkOwner(userID, monitorID) {
 async function afterLogin(socket, user) {
     socket.userID = user.id;
     socket.join(user.id);
+
+    // Heartbeats are broadcast to a room named after the monitor's owner. Users
+    // who may see every monitor also join a shared room that those broadcasts
+    // are addressed to, so they receive live beats for monitors they do not own.
+    if (canViewAllMonitors(user)) {
+        socket.join(ROOM_VIEW_ALL_MONITORS);
+    }
 
     let monitorList = await server.sendMonitorList(socket);
     await Promise.allSettled([
@@ -1899,11 +1978,15 @@ async function initDatabase(testMode = false) {
  * @returns {Promise<void>}
  */
 async function startMonitor(userID, monitorID) {
-    await checkOwner(userID, monitorID);
+    // A monitor whose owner was deleted has user_id = NULL. Callers have already
+    // authorised the action, so such a monitor is still startable by id alone.
+    if (userID != null) {
+        await checkOwner(userID, monitorID);
+    }
 
     log.info("manage", `Resume Monitor: ${monitorID} User ID: ${userID}`);
 
-    await R.exec("UPDATE monitor SET active = 1 WHERE id = ? AND user_id = ? ", [monitorID, userID]);
+    await R.exec("UPDATE monitor SET active = 1 WHERE id = ? ", [monitorID]);
 
     let monitor = await R.findOne("monitor", " id = ? ", [monitorID]);
 
@@ -1932,11 +2015,14 @@ async function restartMonitor(userID, monitorID) {
  * @returns {Promise<void>}
  */
 async function pauseMonitor(userID, monitorID) {
-    await checkOwner(userID, monitorID);
+    // See startMonitor: an orphaned monitor (user_id NULL) is still pausable.
+    if (userID != null) {
+        await checkOwner(userID, monitorID);
+    }
 
     log.info("manage", `Pause Monitor: ${monitorID} User ID: ${userID}`);
 
-    await R.exec("UPDATE monitor SET active = 0 WHERE id = ? AND user_id = ? ", [monitorID, userID]);
+    await R.exec("UPDATE monitor SET active = 0 WHERE id = ? ", [monitorID]);
 
     if (monitorID in server.monitorList) {
         await server.monitorList[monitorID].stop();

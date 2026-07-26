@@ -50,6 +50,7 @@ const { demoMode } = require("../config");
 const version = require("../../package.json").version;
 const apicache = require("../modules/apicache");
 const { UptimeKumaServer } = require("../uptime-kuma-server");
+const { ROOM_VIEW_ALL_MONITORS } = require("../socket-permissions");
 const { DockerHost } = require("../docker");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
@@ -1056,7 +1057,7 @@ class Monitor extends BeanModel {
 
             // Send to frontend
             log.debug("monitor", `[${this.name}] Send to socket`);
-            io.to(this.user_id).emit("heartbeat", bean.toJSON());
+            io.to(this.user_id).to(ROOM_VIEW_ALL_MONITORS).emit("heartbeat", bean.toJSON());
             Monitor.sendStats(io, this.id, this.user_id);
 
             // Store to database
@@ -1319,18 +1320,18 @@ class Monitor extends BeanModel {
         if (hasClients) {
             // Send 24 hour average ping
             let data24h = await uptimeCalculator.get24Hour();
-            io.to(userID).emit("avgPing", monitorID, data24h.avgPing ? Number(data24h.avgPing.toFixed(2)) : null);
+            io.to(userID).to(ROOM_VIEW_ALL_MONITORS).emit("avgPing", monitorID, data24h.avgPing ? Number(data24h.avgPing.toFixed(2)) : null);
 
             // Send 24 hour uptime
-            io.to(userID).emit("uptime", monitorID, 24, data24h.uptime);
+            io.to(userID).to(ROOM_VIEW_ALL_MONITORS).emit("uptime", monitorID, 24, data24h.uptime);
 
             // Send 30 day uptime
             let data30d = await uptimeCalculator.get30Day();
-            io.to(userID).emit("uptime", monitorID, 720, data30d.uptime);
+            io.to(userID).to(ROOM_VIEW_ALL_MONITORS).emit("uptime", monitorID, 720, data30d.uptime);
 
             // Send 1-year uptime
             let data1y = await uptimeCalculator.get1Year();
-            io.to(userID).emit("uptime", monitorID, "1y", data1y.uptime);
+            io.to(userID).to(ROOM_VIEW_ALL_MONITORS).emit("uptime", monitorID, "1y", data1y.uptime);
 
             // Send Cert Info
             await Monitor.sendCertInfo(io, monitorID, userID);
@@ -1352,7 +1353,7 @@ class Monitor extends BeanModel {
     static async sendCertInfo(io, monitorID, userID) {
         let tlsInfo = await R.findOne("monitor_tls_info", "monitor_id = ?", [monitorID]);
         if (tlsInfo != null) {
-            io.to(userID).emit("certInfo", monitorID, tlsInfo.info_json);
+            io.to(userID).to(ROOM_VIEW_ALL_MONITORS).emit("certInfo", monitorID, tlsInfo.info_json);
         }
     }
 
@@ -1370,7 +1371,7 @@ class Monitor extends BeanModel {
             const supportInfo = await DomainExpiry.checkSupport(monitor);
             const domain = await DomainExpiry.findByDomainNameOrCreate(supportInfo.domain);
             if (domain?.expiry) {
-                io.to(userID).emit("domainInfo", monitorID, domain.daysRemaining, new Date(domain.expiry));
+                io.to(userID).to(ROOM_VIEW_ALL_MONITORS).emit("domainInfo", monitorID, domain.daysRemaining, new Date(domain.expiry));
             }
         } catch (e) {}
     }
@@ -1994,8 +1995,14 @@ class Monitor extends BeanModel {
             delete server.monitorList[monitorID];
         }
 
-        // Delete from database
-        await R.exec("DELETE FROM monitor WHERE id = ? AND user_id = ? ", [monitorID, userID]);
+        // Delete from database. A null userID means the caller has already
+        // authorised the deletion regardless of who owns the monitor (a user
+        // holding monitor.delete.all, or a monitor whose owner was deleted).
+        if (userID == null) {
+            await R.exec("DELETE FROM monitor WHERE id = ? ", [monitorID]);
+        } else {
+            await R.exec("DELETE FROM monitor WHERE id = ? AND user_id = ? ", [monitorID, userID]);
+        }
     }
 
     /**
@@ -2005,8 +2012,12 @@ class Monitor extends BeanModel {
      * @returns {Promise<void>}
      */
     static async deleteMonitorRecursively(monitorID, userID) {
-        // Check if this monitor is a group
-        const monitor = await R.findOne("monitor", " id = ? AND user_id = ? ", [monitorID, userID]);
+        // Check if this monitor is a group. As in deleteMonitor, a null userID
+        // means ownership has already been authorised by the caller.
+        const monitor =
+            userID == null
+                ? await R.findOne("monitor", " id = ? ", [monitorID])
+                : await R.findOne("monitor", " id = ? AND user_id = ? ", [monitorID, userID]);
 
         if (monitor && monitor.type === "group") {
             // Get all children and delete them recursively
