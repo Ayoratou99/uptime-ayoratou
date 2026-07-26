@@ -42,6 +42,15 @@
                             {{ $t("Edit") }}
                         </button>
                         <button
+                            class="btn btn-normal"
+                            :disabled="!user.twofaStatus"
+                            :title="user.twofaStatus ? $t('resetTwoFATitle') : $t('twoFANotSetUpYet')"
+                            @click="confirmReset2FA(user)"
+                        >
+                            <font-awesome-icon icon="unlock" />
+                            {{ $t("resetTwoFA") }}
+                        </button>
+                        <button
                             class="btn btn-danger"
                             :disabled="user.id === $root.userID"
                             :title="user.id === $root.userID ? $t('cannotDeleteSelf') : ''"
@@ -188,6 +197,16 @@
         >
             {{ $t("confirmDeleteUser") }}
         </Confirm>
+
+        <Confirm
+            ref="confirmReset2FADialog"
+            btn-style="btn-warning"
+            :yes-text="$t('Yes')"
+            :no-text="$t('No')"
+            @yes="doReset2FA"
+        >
+            {{ $t("confirmResetTwoFA") }}
+        </Confirm>
     </div>
 </template>
 
@@ -259,6 +278,7 @@ export default {
             modal: null,
             processing: false,
             pendingDeleteID: null,
+            pendingReset2FAID: null,
             roles: ["admin", "editor", "viewer"],
             groupedPermissions: PERMISSION_GROUPS,
             draft: this.emptyDraft(),
@@ -434,6 +454,27 @@ export default {
         confirmDelete(user) {
             this.pendingDeleteID = user.id;
             this.$refs.confirmDeleteDialog.show();
+        },
+
+        /**
+         * Ask before resetting someone's second factor.
+         * @param {object} user User row.
+         * @returns {void}
+         */
+        confirmReset2FA(user) {
+            this.pendingReset2FAID = user.id;
+            this.$refs.confirmReset2FADialog.show();
+        },
+
+        /**
+         * Clear the pending user's 2FA, forcing a fresh enrolment at next login.
+         * @returns {void}
+         */
+        doReset2FA() {
+            this.$root.getSocket().emit("resetUser2FA", this.pendingReset2FAID, (res) => {
+                this.$root.toastRes(res);
+                this.pendingReset2FAID = null;
+            });
         },
 
         /**

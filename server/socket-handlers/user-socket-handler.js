@@ -255,9 +255,10 @@ module.exports.userSocketHandler = (socket) => {
                 throw new Error("User not found");
             }
 
-            await R.exec("UPDATE `user` SET twofa_status = 0, twofa_secret = NULL, twofa_last_token = NULL WHERE id = ? ", [
-                bean.id,
-            ]);
+            await R.exec(
+                "UPDATE `user` SET twofa_status = 0, twofa_secret = NULL, twofa_last_token = NULL WHERE id = ? ",
+                [bean.id]
+            );
 
             log.info("user", `Reset 2FA for user ${bean.id} (${bean.username}) by user ${actor.id}`);
 

@@ -431,6 +431,8 @@ let needSetup = false;
                     // their password, so an existing token would otherwise let
                     // them back in and skip the enforced setup entirely.
                     if (user.twofa_status === 0) {
+                        // Errors here are caught by this handler's own
+                        // try/catch, which reports authInvalidToken.
                         const uri = await beginEnforced2FASetup(socket, user);
 
                         log.info("auth", `2FA setup required for user ${decoded.username}. IP=${clientIP}`);
@@ -500,15 +502,29 @@ let needSetup = false;
                 if (user.twofa_status === 0) {
                     // 2FA is mandatory. The password is proven, but no session
                     // is created until an authenticator code confirms the setup.
-                    const uri = await beginEnforced2FASetup(socket, user);
+                    //
+                    // This branch writes to the database, unlike the rest of
+                    // this handler, and the handler has no outer try/catch: an
+                    // error here would otherwise never reach the callback and
+                    // the user's login would hang with no explanation.
+                    try {
+                        const uri = await beginEnforced2FASetup(socket, user);
 
-                    log.info("auth", `2FA setup required for user ${data.username}. IP=${clientIP}`);
+                        log.info("auth", `2FA setup required for user ${data.username}. IP=${clientIP}`);
 
-                    callback({
-                        ok: false,
-                        setup2FARequired: true,
-                        uri,
-                    });
+                        callback({
+                            ok: false,
+                            setup2FARequired: true,
+                            uri,
+                        });
+                    } catch (e) {
+                        log.error("auth", `Could not start 2FA setup for ${data.username}: ${e.message}`);
+                        callback({
+                            ok: false,
+                            msg: "twoFASetupFailed",
+                            msgi18n: true,
+                        });
+                    }
                     return;
                 }
 
@@ -599,10 +615,7 @@ let needSetup = false;
                     throw new Error("Invalid code, please try the current one from your app.");
                 }
 
-                await R.exec("UPDATE `user` SET twofa_status = 1, twofa_last_token = ? WHERE id = ? ", [
-                    token,
-                    userID,
-                ]);
+                await R.exec("UPDATE `user` SET twofa_status = 1, twofa_last_token = ? WHERE id = ? ", [token, userID]);
                 user.twofa_status = 1;
 
                 // Consume the pending state before creating the session so the
@@ -698,37 +711,20 @@ let needSetup = false;
             }
         });
 
+        // Kept so an older client gets a clear refusal rather than a missing
+        // handler, but 2FA is mandatory: a user cannot turn their own off.
+        // Only an administrator can reset it, which forces a fresh enrolment
+        // rather than leaving the account without a second factor.
         socket.on("disable2FA", async (currentPassword, callback) => {
             const clientIP = await server.getClientIP(socket);
 
-            try {
-                if (!(await twoFaRateLimiter.pass(callback))) {
-                    return;
-                }
+            log.warn("auth", `Refused attempt to disable mandatory 2FA. IP=${clientIP}`);
 
-                checkLogin(socket);
-                await doubleCheckPassword(socket, currentPassword);
-
-                // 2FA is mandatory for every account, so a user cannot turn
-                // their own off. Only an administrator can reset it, which
-                // forces a fresh enrolment rather than leaving it disabled.
-                throw new Error("twoFAMandatory");
-
-                log.info("auth", `Disabled 2FA token. IP=${clientIP}`);
-
-                callback({
-                    ok: true,
-                    msg: "2faDisabled",
-                    msgi18n: true,
-                });
-            } catch (error) {
-                log.error("auth", `Error disabling 2FA token. IP=${clientIP}`);
-
-                callback({
-                    ok: false,
-                    msg: error.message,
-                });
-            }
+            callback({
+                ok: false,
+                msg: "twoFAMandatory",
+                msgi18n: true,
+            });
         });
 
         socket.on("verifyToken", async (token, currentPassword, callback) => {

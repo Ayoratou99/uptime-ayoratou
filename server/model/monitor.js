@@ -746,7 +746,6 @@ class Monitor extends BeanModel {
                             );
                         }
                     }
-
                 } else if (this.type === "ping") {
                     bean.ping = await ping(
                         this.hostname,

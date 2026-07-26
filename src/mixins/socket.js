@@ -478,8 +478,9 @@ export default {
                     token,
                 },
                 (res) => {
-                    if (res.tokenRequired) {
+                    if (res.tokenRequired || res.setup2FARequired) {
                         callback(res);
+                        return;
                     }
 
                     if (res.ok) {
@@ -506,12 +507,44 @@ export default {
             socket.emit("loginByToken", token, (res) => {
                 this.allowLoginDialog = true;
 
+                if (res.setup2FARequired) {
+                    // An administrator reset this user's 2FA. The stored token
+                    // is still valid, so drop it and send them through
+                    // enrolment instead of a silent failed login.
+                    this.storage().removeItem("token");
+                    this.socket.token = null;
+                    this.loggedIn = false;
+                    this.emitter.emit("setup2FARequired", res.uri);
+                    return;
+                }
+
                 if (!res.ok) {
                     this.logout();
                 } else {
                     this.loggedIn = true;
                     this.username = this.getJWTPayload()?.username;
                 }
+            });
+        },
+
+        /**
+         * Confirm the first authenticator code during mandatory 2FA enrolment.
+         *
+         * The session only exists after this succeeds, so the response carries
+         * the JWT just as a normal login does.
+         * @param {string} token Six digit code from the authenticator app.
+         * @param {Function} callback Receives the server response.
+         * @returns {void}
+         */
+        completeTwoFASetup(token, callback) {
+            socket.emit("completeTwoFASetup", token, (res) => {
+                if (res.ok) {
+                    this.storage().token = res.token;
+                    this.socket.token = res.token;
+                    this.loggedIn = true;
+                    this.username = this.getJWTPayload()?.username;
+                }
+                callback(res);
             });
         },
 
