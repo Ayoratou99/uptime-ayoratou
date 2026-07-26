@@ -690,6 +690,15 @@ class Monitor extends BeanModel {
                         log.info("monitor", res.data);
                     }
 
+                    // Must run before any branch sets bean.status = UP. The catch
+                    // below does not reset the status -- every other failure
+                    // path throws while it is still the initial DOWN -- so
+                    // checking after the assignment would report a failed
+                    // condition as an UP beat. Conditions and the keyword /
+                    // JSON query rules must all pass, so the order between
+                    // them does not change the outcome.
+                    this.checkHttpConditions(res, bean.ping);
+
                     if (this.type === "http") {
                         bean.status = UP;
                     } else if (this.type === "keyword") {
@@ -738,10 +747,6 @@ class Monitor extends BeanModel {
                         }
                     }
 
-                    // Applied after the type-specific check so conditions
-                    // compose with the keyword and JSON query rules rather
-                    // than replacing them.
-                    this.checkHttpConditions(res, bean.ping);
                 } else if (this.type === "ping") {
                     bean.ping = await ping(
                         this.hostname,

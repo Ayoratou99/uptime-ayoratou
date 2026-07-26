@@ -244,6 +244,34 @@ module.exports.userSocketHandler = (socket) => {
         }
     });
 
+    // Clearing the secret is what forces re-enrolment: login refuses to create
+    // a session while twofa_status is 0, so the user must scan a new QR code.
+    socket.on("resetUser2FA", async (userID, callback) => {
+        try {
+            const actor = await requirePermission(socket, PERMISSIONS.USER_MANAGE);
+
+            const bean = await R.findOne("user", " id = ? ", [userID]);
+            if (!bean) {
+                throw new Error("User not found");
+            }
+
+            await R.exec("UPDATE `user` SET twofa_status = 0, twofa_secret = NULL, twofa_last_token = NULL WHERE id = ? ", [
+                bean.id,
+            ]);
+
+            log.info("user", `Reset 2FA for user ${bean.id} (${bean.username}) by user ${actor.id}`);
+
+            // Drop their live sessions too, otherwise an already-open tab keeps
+            // working and the reset only takes effect whenever they next log in.
+            disconnectSessions(bean.id);
+
+            await sendUserList(socket);
+            callback({ ok: true, msg: "twoFAResetDone", msgi18n: true });
+        } catch (e) {
+            callback({ ok: false, msg: e.message });
+        }
+    });
+
     socket.on("getMyPermissions", async (callback) => {
         try {
             const user = await getSocketUser(socket);

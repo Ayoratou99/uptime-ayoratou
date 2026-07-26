@@ -3,10 +3,13 @@
  *
  * A monitor configured with `auto_incident_minutes` posts an incident on every
  * status page that publishes it once it has been continuously down for that
- * long, and resolves it when the monitor recovers.
- *
- * The delay exists so a brief blip does not put a notice in front of the
+ * long. The delay exists so a brief blip does not put a notice in front of the
  * public; only an outage that persists is worth announcing.
+ *
+ * Posting is the only thing automated. An incident is never closed or updated
+ * by the system: a monitor coming back tells you the check passes again, not
+ * that the underlying problem is understood or that the public has been given
+ * an explanation. Updating and resolving stay with whoever is handling it.
  */
 const { R } = require("redbean-node");
 const dayjs = require("dayjs");
@@ -110,27 +113,11 @@ async function openIncident(monitor, statusPageID, minutesDown) {
 }
 
 /**
- * Resolve the auto-incident a monitor opened, now that it has recovered.
- * @param {object} monitor Monitor bean.
- * @param {Bean} incident Open incident bean.
- * @returns {Promise<void>}
- */
-async function resolveIncident(monitor, incident) {
-    const content = `${monitor.name} is responding normally again.`;
-    await incident.addUpdate(INCIDENT_STATUS.RESOLVED, content, null);
-
-    log.info("auto-incident", `Resolved incident ${incident.id} for monitor ${monitor.id}`);
-
-    statusPageMailer
-        .notifyIncident(incident.status_page_id, incident.toPublicJSON(), {
-            status: INCIDENT_STATUS.RESOLVED,
-            content,
-        })
-        .catch((e) => log.warn("auto-incident", e.message));
-}
-
-/**
- * Evaluate a monitor's automatic incident state after a heartbeat.
+ * Post an incident if this monitor has now been down long enough.
+ *
+ * Recovery is deliberately not handled here. Nothing the system observes tells
+ * it the incident is over in any sense the public cares about, so an open
+ * incident stays open until someone updates or resolves it by hand.
  *
  * Called from the beat loop, so it must never throw: an incident bookkeeping
  * failure must not interrupt monitoring.
@@ -140,6 +127,10 @@ async function resolveIncident(monitor, incident) {
  */
 async function handleHeartbeat(monitor, isDown) {
     try {
+        if (!isDown) {
+            return;
+        }
+
         const threshold = Number(monitor.auto_incident_minutes) || 0;
         if (threshold <= 0) {
             return;
@@ -150,18 +141,6 @@ async function handleHeartbeat(monitor, isDown) {
             return;
         }
 
-        if (!isDown) {
-            // Recovered: close anything this monitor opened.
-            for (const statusPageID of statusPageIDs) {
-                const open = await findOpenAutoIncident(monitor.id, statusPageID);
-                if (open) {
-                    await resolveIncident(monitor, open);
-                }
-            }
-            apicache.clear();
-            return;
-        }
-
         const minutesDown = await getDowntimeMinutes(monitor.id);
         if (minutesDown === null || minutesDown < threshold) {
             return;
@@ -169,8 +148,10 @@ async function handleHeartbeat(monitor, isDown) {
 
         let opened = false;
         for (const statusPageID of statusPageIDs) {
-            // Only one open auto-incident per monitor per page, however many
-            // beats fail while the outage continues.
+            // One open incident per monitor per page, however many beats fail.
+            // Because nothing auto-resolves, this also means a monitor that
+            // flaps repeatedly cannot bury the page in duplicate notices: the
+            // existing incident is reused until someone closes it.
             if (await findOpenAutoIncident(monitor.id, statusPageID)) {
                 continue;
             }
@@ -182,7 +163,7 @@ async function handleHeartbeat(monitor, isDown) {
             apicache.clear();
         }
     } catch (e) {
-        log.warn("auto-incident", `Could not update incidents for monitor ${monitor?.id}: ${e.message}`);
+        log.warn("auto-incident", `Could not post incident for monitor ${monitor?.id}: ${e.message}`);
     }
 }
 

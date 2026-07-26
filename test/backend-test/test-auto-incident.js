@@ -210,8 +210,11 @@ describe("Automatic incidents", () => {
         });
     });
 
-    describe("resolving", () => {
-        test("closes the incident when the monitor recovers", async () => {
+    // Posting is automated; closing is not. Recovery must leave the incident
+    // exactly as it was, so an operator decides when the public is told it is
+    // over and what to say about it.
+    describe("never resolving automatically", () => {
+        test("recovery leaves the incident open and unchanged", async () => {
             const monitor = await makeMonitor({ auto_incident_minutes: 5 });
             await makeStatusPageWith(monitor.id);
             await makeTransition(monitor.id, DOWN, 7);
@@ -220,11 +223,11 @@ describe("Automatic incidents", () => {
             await autoIncident.handleHeartbeat(monitor, false);
 
             const incident = (await knex("incident"))[0];
-            assert.strictEqual(incident.status, INCIDENT_STATUS.RESOLVED);
-            assert.strictEqual(!!incident.active, false);
+            assert.strictEqual(incident.status, INCIDENT_STATUS.INVESTIGATING);
+            assert.strictEqual(!!incident.active, true, "must stay open until a person resolves it");
         });
 
-        test("records the recovery on the timeline", async () => {
+        test("recovery adds nothing to the timeline", async () => {
             const monitor = await makeMonitor({ auto_incident_minutes: 5 });
             await makeStatusPageWith(monitor.id);
             await makeTransition(monitor.id, DOWN, 7);
@@ -232,13 +235,27 @@ describe("Automatic incidents", () => {
 
             await autoIncident.handleHeartbeat(monitor, false);
 
-            const updates = await knex("incident_update").orderBy("id");
-            assert.strictEqual(updates.length, 2, "open and resolve are both recorded");
-            assert.strictEqual(updates[1].status, INCIDENT_STATUS.RESOLVED);
-            assert.match(updates[1].content, /responding normally/);
+            const updates = await knex("incident_update");
+            assert.strictEqual(updates.length, 1, "only the opening entry exists");
+            assert.strictEqual(updates[0].status, INCIDENT_STATUS.INVESTIGATING);
         });
 
-        test("leaves incidents an operator wrote by hand alone", async () => {
+        test("repeated recovery beats never touch the incident", async () => {
+            const monitor = await makeMonitor({ auto_incident_minutes: 5 });
+            await makeStatusPageWith(monitor.id);
+            await makeTransition(monitor.id, DOWN, 7);
+            await autoIncident.handleHeartbeat(monitor, true);
+
+            for (let i = 0; i < 5; i++) {
+                await autoIncident.handleHeartbeat(monitor, false);
+            }
+
+            const incident = (await knex("incident"))[0];
+            assert.strictEqual(!!incident.active, true);
+            assert.strictEqual((await knex("incident_update")).length, 1);
+        });
+
+        test("incidents an operator wrote by hand are never touched", async () => {
             const monitor = await makeMonitor({ auto_incident_minutes: 5 });
             const page = await makeStatusPageWith(monitor.id);
             await knex("incident").insert({
@@ -259,15 +276,7 @@ describe("Automatic incidents", () => {
             assert.strictEqual(!!incident.active, true);
         });
 
-        test("recovery with nothing open is a no-op", async () => {
-            const monitor = await makeMonitor({ auto_incident_minutes: 5 });
-            await makeStatusPageWith(monitor.id);
-
-            await assert.doesNotReject(() => autoIncident.handleHeartbeat(monitor, false));
-            assert.strictEqual((await knex("incident")).length, 0);
-        });
-
-        test("a fresh outage after recovery opens a new incident", async () => {
+        test("a flapping monitor reuses the open incident instead of piling up notices", async () => {
             const monitor = await makeMonitor({ auto_incident_minutes: 5 });
             await makeStatusPageWith(monitor.id);
 
@@ -275,11 +284,30 @@ describe("Automatic incidents", () => {
             await autoIncident.handleHeartbeat(monitor, true);
             await autoIncident.handleHeartbeat(monitor, false);
 
+            // Down again, still within the same unresolved incident.
             await knex("heartbeat").del();
             await makeTransition(monitor.id, DOWN, 7);
             await autoIncident.handleHeartbeat(monitor, true);
 
-            assert.strictEqual((await knex("incident")).length, 2, "second outage is its own incident");
+            assert.strictEqual((await knex("incident")).length, 1, "no duplicate while one is still open");
+        });
+
+        test("once a person resolves it, a later outage opens a new one", async () => {
+            const monitor = await makeMonitor({ auto_incident_minutes: 5 });
+            await makeStatusPageWith(monitor.id);
+
+            await makeTransition(monitor.id, DOWN, 7);
+            await autoIncident.handleHeartbeat(monitor, true);
+
+            // Stand in for an operator resolving it through the UI.
+            const incident = await R.findOne("incident", " id = ? ", [(await knex("incident"))[0].id]);
+            await incident.addUpdate(INCIDENT_STATUS.RESOLVED, "Sorted, thanks for your patience.", null);
+
+            await knex("heartbeat").del();
+            await makeTransition(monitor.id, DOWN, 7);
+            await autoIncident.handleHeartbeat(monitor, true);
+
+            assert.strictEqual((await knex("incident")).length, 2, "a new outage after closure is its own incident");
         });
     });
 

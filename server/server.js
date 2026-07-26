@@ -427,6 +427,22 @@ let needSetup = false;
                         throw new Error("The token is invalid due to password change or old token");
                     }
 
+                    // An administrator resetting a user's 2FA does not change
+                    // their password, so an existing token would otherwise let
+                    // them back in and skip the enforced setup entirely.
+                    if (user.twofa_status === 0) {
+                        const uri = await beginEnforced2FASetup(socket, user);
+
+                        log.info("auth", `2FA setup required for user ${decoded.username}. IP=${clientIP}`);
+
+                        callback({
+                            ok: false,
+                            setup2FARequired: true,
+                            uri,
+                        });
+                        return;
+                    }
+
                     log.debug("auth", "afterLogin");
                     await afterLogin(socket, user);
                     log.debug("auth", "afterLogin ok");
@@ -482,14 +498,18 @@ let needSetup = false;
 
             if (user) {
                 if (user.twofa_status === 0) {
-                    await afterLogin(socket, user);
+                    // 2FA is mandatory. The password is proven, but no session
+                    // is created until an authenticator code confirms the setup.
+                    const uri = await beginEnforced2FASetup(socket, user);
 
-                    log.info("auth", `Successfully logged in user ${data.username}. IP=${clientIP}`);
+                    log.info("auth", `2FA setup required for user ${data.username}. IP=${clientIP}`);
 
                     callback({
-                        ok: true,
-                        token: User.createJWT(user, server.jwtSecret),
+                        ok: false,
+                        setup2FARequired: true,
+                        uri,
                     });
+                    return;
                 }
 
                 if (user.twofa_status === 1 && !data.token) {
@@ -498,6 +518,7 @@ let needSetup = false;
                     callback({
                         tokenRequired: true,
                     });
+                    return;
                 }
 
                 if (data.token) {
@@ -552,6 +573,58 @@ let needSetup = false;
             }
         });
 
+        // Finish mandatory enrolment: verify the first code, enable 2FA and
+        // only then create the session.
+        socket.on("completeTwoFASetup", async (token, callback) => {
+            const clientIP = await server.getClientIP(socket);
+
+            try {
+                if (!(await twoFaRateLimiter.pass(callback))) {
+                    return;
+                }
+
+                const userID = socket.pending2FAUserID;
+                if (!userID) {
+                    throw new Error("No 2FA setup in progress, please sign in again.");
+                }
+
+                const user = await R.findOne("user", " id = ? AND active = 1 ", [userID]);
+                if (!user) {
+                    throw new Error("authUserInactiveOrDeleted");
+                }
+
+                if (!notp.totp.verify(token, user.twofa_secret, twoFAVerifyOptions)) {
+                    await twoFaRateLimiter.removeTokens(1);
+                    log.warn("auth", `Invalid 2FA setup code for user ${user.username}. IP=${clientIP}`);
+                    throw new Error("Invalid code, please try the current one from your app.");
+                }
+
+                await R.exec("UPDATE `user` SET twofa_status = 1, twofa_last_token = ? WHERE id = ? ", [
+                    token,
+                    userID,
+                ]);
+                user.twofa_status = 1;
+
+                // Consume the pending state before creating the session so the
+                // same enrolment cannot be replayed on this socket.
+                socket.pending2FAUserID = null;
+
+                await afterLogin(socket, user);
+
+                log.info("auth", `2FA enrolled and logged in user ${user.username}. IP=${clientIP}`);
+
+                callback({
+                    ok: true,
+                    token: User.createJWT(user, server.jwtSecret),
+                });
+            } catch (error) {
+                callback({
+                    ok: false,
+                    msg: error.message,
+                });
+            }
+        });
+
         socket.on("prepare2FA", async (currentPassword, callback) => {
             try {
                 if (!(await twoFaRateLimiter.pass(callback))) {
@@ -572,7 +645,7 @@ let needSetup = false;
                     // Related issue: https://github.com/louislam/uptime-kuma/issues/486
                     encodedSecret = encodedSecret.toString().replace(/=/g, "");
 
-                    let uri = `otpauth://totp/Uptime%20Kuma:${user.username}?secret=${encodedSecret}`;
+                    let uri = `otpauth://totp/Ayoratou:${encodeURIComponent(user.username)}?secret=${encodedSecret}&issuer=Ayoratou`;
 
                     await R.exec("UPDATE `user` SET twofa_secret = ? WHERE id = ? ", [newSecret, socket.userID]);
 
@@ -635,7 +708,11 @@ let needSetup = false;
 
                 checkLogin(socket);
                 await doubleCheckPassword(socket, currentPassword);
-                await TwoFA.disable2FA(socket.userID);
+
+                // 2FA is mandatory for every account, so a user cannot turn
+                // their own off. Only an administrator can reset it, which
+                // forces a fresh enrolment rather than leaving it disabled.
+                throw new Error("twoFAMandatory");
 
                 log.info("auth", `Disabled 2FA token. IP=${clientIP}`);
 
@@ -1894,6 +1971,29 @@ async function getEditableMonitor(socket, monitorID, ownPermission, allPermissio
     }
     await requireActOn(socket, ownPermission, allPermission, monitor.user_id);
     return monitor;
+}
+
+/**
+ * Begin mandatory 2FA enrolment for a user who has proven their password.
+ *
+ * A fresh secret is issued and stored, but `twofa_status` stays 0 until a code
+ * confirms it, so an abandoned enrolment leaves the account exactly as it was.
+ * The socket records which user is mid-enrolment; it is not logged in yet.
+ * @param {Socket} socket Socket.io instance
+ * @param {Bean} user User who authenticated with a password or valid token
+ * @returns {Promise<string>} otpauth URI for the authenticator app
+ */
+async function beginEnforced2FASetup(socket, user) {
+    const newSecret = genSecret();
+
+    // Google Authenticator rejects padding, see notp issue linked in prepare2FA.
+    const encodedSecret = base32.encode(newSecret).toString().replace(/=/g, "");
+
+    await R.exec("UPDATE `user` SET twofa_secret = ? WHERE id = ? ", [newSecret, user.id]);
+
+    socket.pending2FAUserID = user.id;
+
+    return `otpauth://totp/Ayoratou:${encodeURIComponent(user.username)}?secret=${encodedSecret}&issuer=Ayoratou`;
 }
 
 /**
