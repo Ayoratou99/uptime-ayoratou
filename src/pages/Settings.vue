@@ -84,7 +84,7 @@ export default {
         },
 
         subMenus() {
-            return {
+            const menus = {
                 general: {
                     title: this.$t("General"),
                 },
@@ -122,6 +122,15 @@ export default {
                     title: this.$t("About"),
                 },
             };
+
+            // Only administrators (or users granted user.manage) manage accounts.
+            // Slotted in before "About" rather than appended after it.
+            if (this.$root.can("user.manage")) {
+                const { about, ...rest } = menus;
+                return { ...rest, users: { title: this.$t("Users") }, about };
+            }
+
+            return menus;
         },
     },
 

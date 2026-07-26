@@ -10,6 +10,7 @@ const config = require("../config");
 const dayjs = require("dayjs");
 
 const { setting } = require("../util-server");
+const { canViewAllStatusPages } = require("../socket-permissions");
 const {
     STATUS_PAGE_ALL_DOWN,
     STATUS_PAGE_ALL_UP,
@@ -366,13 +367,21 @@ class StatusPage extends BeanModel {
     static async sendStatusPageList(io, socket) {
         let result = {};
 
-        let list = await R.findAll("status_page", " ORDER BY title ");
+        // Only surface pages the user can actually act on: their own, unless
+        // they hold statuspage.view.all (implied by the edit/delete .all
+        // permissions). Otherwise the list would offer pages that error on open.
+        const user = await R.findOne("user", " id = ? ", [socket.userID]);
+        let list = canViewAllStatusPages(user)
+            ? await R.findAll("status_page", " ORDER BY title ")
+            : await R.find("status_page", " user_id = ? ORDER BY title ", [socket.userID]);
 
         for (let item of list) {
             result[item.id] = await item.toJSON();
         }
 
-        io.to(socket.userID).emit("statusPageList", result);
+        // Addressed to this socket, not the owner's room: users in the same room
+        // can have different visibility.
+        socket.emit("statusPageList", result);
         return list;
     }
 

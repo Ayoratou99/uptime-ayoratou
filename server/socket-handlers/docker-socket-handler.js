@@ -1,7 +1,8 @@
 const { sendDockerHostList } = require("../client");
-const { checkLogin } = require("../util-server");
 const { DockerHost } = require("../docker");
 const { log } = require("../../src/util");
+const { PERMISSIONS } = require("../permissions");
+const { requirePermission } = require("../socket-permissions");
 
 /**
  * Handlers for docker hosts
@@ -11,7 +12,7 @@ const { log } = require("../../src/util");
 module.exports.dockerSocketHandler = (socket) => {
     socket.on("addDockerHost", async (dockerHost, dockerHostID, callback) => {
         try {
-            checkLogin(socket);
+            await requirePermission(socket, PERMISSIONS.SETTINGS_MANAGE);
 
             let dockerHostBean = await DockerHost.save(dockerHost, dockerHostID, socket.userID);
             await sendDockerHostList(socket);
@@ -32,7 +33,7 @@ module.exports.dockerSocketHandler = (socket) => {
 
     socket.on("deleteDockerHost", async (dockerHostID, callback) => {
         try {
-            checkLogin(socket);
+            await requirePermission(socket, PERMISSIONS.SETTINGS_MANAGE);
 
             await DockerHost.delete(dockerHostID, socket.userID);
             await sendDockerHostList(socket);
@@ -52,7 +53,7 @@ module.exports.dockerSocketHandler = (socket) => {
 
     socket.on("testDockerHost", async (dockerHost, callback) => {
         try {
-            checkLogin(socket);
+            await requirePermission(socket, PERMISSIONS.SETTINGS_MANAGE);
 
             let amount = await DockerHost.testDockerHost(dockerHost);
             let msg;

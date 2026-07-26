@@ -151,7 +151,7 @@ const { login } = require("./auth");
 const passwordHash = require("./password-hash");
 
 log.debug("server", "Importing Permissions");
-const { PERMISSIONS, hasPermission } = require("./permissions");
+const { PERMISSIONS, hasPermission, getEffectivePermissions } = require("./permissions");
 const {
     ROOM_VIEW_ALL_MONITORS,
     getSocketUser,
@@ -212,6 +212,7 @@ const { proxySocketHandler } = require("./socket-handlers/proxy-socket-handler")
 const { dockerSocketHandler } = require("./socket-handlers/docker-socket-handler");
 const { maintenanceSocketHandler } = require("./socket-handlers/maintenance-socket-handler");
 const { apiKeySocketHandler } = require("./socket-handlers/api-key-socket-handler");
+const { userSocketHandler } = require("./socket-handlers/user-socket-handler");
 const { generalSocketHandler } = require("./socket-handlers/general-socket-handler");
 const { Settings } = require("./settings");
 const apicache = require("./modules/apicache");
@@ -1529,7 +1530,7 @@ let needSetup = false;
 
         socket.on("setSettings", async (data, currentPassword, callback) => {
             try {
-                checkLogin(socket);
+                await requirePermission(socket, PERMISSIONS.SETTINGS_MANAGE);
 
                 // If currently is disabled auth, don't need to check
                 // Disabled Auth + Want to Disable Auth => No Check
@@ -1592,7 +1593,7 @@ let needSetup = false;
         // Add or Edit
         socket.on("addNotification", async (notification, notificationID, callback) => {
             try {
-                checkLogin(socket);
+                await requirePermission(socket, PERMISSIONS.NOTIFICATION_MANAGE);
 
                 let notificationBean = await Notification.save(notification, notificationID, socket.userID);
                 await sendNotificationList(socket);
@@ -1613,7 +1614,7 @@ let needSetup = false;
 
         socket.on("deleteNotification", async (notificationID, callback) => {
             try {
-                checkLogin(socket);
+                await requirePermission(socket, PERMISSIONS.NOTIFICATION_MANAGE);
 
                 await Notification.delete(notificationID, socket.userID);
                 await sendNotificationList(socket);
@@ -1633,7 +1634,7 @@ let needSetup = false;
 
         socket.on("testNotification", async (notification, callback) => {
             try {
-                checkLogin(socket);
+                await requirePermission(socket, PERMISSIONS.NOTIFICATION_MANAGE);
 
                 let msg = await Notification.send(notification, notification.name + " Testing");
 
@@ -1688,7 +1689,7 @@ let needSetup = false;
 
         socket.on("clearEvents", async (monitorID, callback) => {
             try {
-                checkLogin(socket);
+                await getEditableMonitor(socket, monitorID, PERMISSIONS.MONITOR_EDIT_OWN, PERMISSIONS.MONITOR_EDIT_ALL);
 
                 log.info("manage", `Clear Events Monitor: ${monitorID} User ID: ${socket.userID}`);
 
@@ -1707,7 +1708,7 @@ let needSetup = false;
 
         socket.on("clearHeartbeats", async (monitorID, callback) => {
             try {
-                checkLogin(socket);
+                await getEditableMonitor(socket, monitorID, PERMISSIONS.MONITOR_EDIT_OWN, PERMISSIONS.MONITOR_EDIT_ALL);
 
                 log.info("manage", `Clear Heartbeats Monitor: ${monitorID} User ID: ${socket.userID}`);
 
@@ -1735,7 +1736,7 @@ let needSetup = false;
 
         socket.on("clearStatistics", async (callback) => {
             try {
-                checkLogin(socket);
+                await requirePermission(socket, PERMISSIONS.SETTINGS_MANAGE);
 
                 log.info("manage", `Clear Statistics User ID: ${socket.userID}`);
 
@@ -1771,6 +1772,7 @@ let needSetup = false;
         remoteBrowserSocketHandler(socket);
         generalSocketHandler(socket, server);
         chartSocketHandler(socket);
+        userSocketHandler(socket);
 
         log.debug("server", "added all socket handlers");
 
@@ -1907,6 +1909,14 @@ async function afterLogin(socket, user) {
     if (canViewAllMonitors(user)) {
         socket.join(ROOM_VIEW_ALL_MONITORS);
     }
+
+    // The UI hides actions the user cannot perform. This is presentation only --
+    // every action is independently authorised server-side.
+    socket.emit("myPermissions", {
+        userID: user.id,
+        role: user.role,
+        permissions: getEffectivePermissions(user),
+    });
 
     let monitorList = await server.sendMonitorList(socket);
     await Promise.allSettled([

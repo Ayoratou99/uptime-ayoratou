@@ -56,6 +56,16 @@ export default {
             statusPageListLoaded: false,
             statusPageList: [],
             proxyList: [],
+            userList: [],
+            userID: null,
+            /** Role of the logged-in user. */
+            myRole: null,
+            /**
+             * Effective permissions of the logged-in user, used to hide actions
+             * they cannot perform. Presentation only -- the server authorises
+             * every action independently.
+             */
+            myPermissions: {},
             connectionErrorMsg: `${this.$t("Cannot connect to the socket server.")} ${this.$t("Reconnecting...")}`,
             showReverseProxyGuide: true,
             cloudflared: {
@@ -76,6 +86,46 @@ export default {
     },
 
     methods: {
+        /**
+         * Whether the logged-in user holds a permission.
+         *
+         * Mirrors the implication rules in server/permissions.js: a `.all`
+         * permission implies the matching `.own`, and both imply `view.all`.
+         * Used to hide actions in the UI; the server still authorises
+         * every action on its own.
+         * @param {string} permission Permission key, e.g. "monitor.create".
+         * @returns {boolean} True if the action should be offered.
+         */
+        can(permission) {
+            if (this.myPermissions[permission]) {
+                return true;
+            }
+            const impliedBy = {
+                "monitor.edit.own": ["monitor.edit.all"],
+                "monitor.delete.own": ["monitor.delete.all"],
+                "monitor.view.all": ["monitor.edit.all", "monitor.delete.all"],
+                "statuspage.edit.own": ["statuspage.edit.all"],
+                "statuspage.delete.own": ["statuspage.delete.all"],
+                "statuspage.view.all": ["statuspage.edit.all", "statuspage.delete.all"],
+            };
+            return (impliedBy[permission] ?? []).some((broader) => this.myPermissions[broader]);
+        },
+
+        /**
+         * Whether the user may modify a record, taking ownership into account.
+         * @param {string} ownPermission Permission for records the user owns.
+         * @param {string} allPermission Permission for records owned by anyone.
+         * @param {number|string|null} ownerID `user_id` of the record.
+         * @returns {boolean} True if the action should be offered.
+         */
+        canActOn(ownPermission, allPermission, ownerID) {
+            if (this.can(allPermission)) {
+                return true;
+            }
+            // eslint-disable-next-line eqeqeq
+            return this.can(ownPermission) && ownerID != null && ownerID == this.userID;
+        },
+
         /**
          * Initialize connection to socket server
          * @param {boolean} bypass Should the check for if we
@@ -181,6 +231,16 @@ export default {
             socket.on("statusPageList", (data) => {
                 this.statusPageListLoaded = true;
                 this.statusPageList = data;
+            });
+
+            socket.on("myPermissions", (data) => {
+                this.userID = data.userID;
+                this.myRole = data.role;
+                this.myPermissions = data.permissions ?? {};
+            });
+
+            socket.on("userList", (data) => {
+                this.userList = data;
             });
 
             socket.on("proxyList", (data) => {

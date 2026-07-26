@@ -1,5 +1,6 @@
-const { checkLogin } = require("../util-server");
 const Database = require("../database");
+const { PERMISSIONS } = require("../permissions");
+const { requirePermission } = require("../socket-permissions");
 
 /**
  * Handlers for database
@@ -10,7 +11,7 @@ module.exports.databaseSocketHandler = (socket) => {
     // Post or edit incident
     socket.on("getDatabaseSize", async (callback) => {
         try {
-            checkLogin(socket);
+            await requirePermission(socket, PERMISSIONS.SETTINGS_MANAGE);
             callback({
                 ok: true,
                 size: await Database.getSize(),
@@ -25,7 +26,7 @@ module.exports.databaseSocketHandler = (socket) => {
 
     socket.on("shrinkDatabase", async (callback) => {
         try {
-            checkLogin(socket);
+            await requirePermission(socket, PERMISSIONS.SETTINGS_MANAGE);
             await Database.shrink();
             callback({
                 ok: true,

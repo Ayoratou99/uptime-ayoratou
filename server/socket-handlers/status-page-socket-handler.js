@@ -1,5 +1,4 @@
 const { R } = require("redbean-node");
-const { checkLogin } = require("../util-server");
 const dayjs = require("dayjs");
 const { log } = require("../../src/util");
 const ImageDataURI = require("../image-data-uri");
@@ -8,6 +7,34 @@ const apicache = require("../modules/apicache");
 const StatusPage = require("../model/status_page");
 const { UptimeKumaServer } = require("../uptime-kuma-server");
 const { Settings } = require("../settings");
+const { PERMISSIONS } = require("../permissions");
+const { requirePermission, requireActOn } = require("../socket-permissions");
+
+/**
+ * Resolve a status page the socket's user is allowed to modify.
+ *
+ * Incidents, groups and page settings all live under a status page, so every
+ * write to any of them is authorised against the page's owner.
+ * @param {Socket} socket Socket.io instance
+ * @param {string} slug Status page slug
+ * @param {string} ownPermission Permission covering pages the user owns
+ * @param {string} allPermission Permission covering pages owned by anyone
+ * @returns {Promise<Bean>} The status page bean
+ * @throws {Error} If the page does not exist or the action is not allowed
+ */
+async function getEditableStatusPage(
+    socket,
+    slug,
+    ownPermission = PERMISSIONS.STATUSPAGE_EDIT_OWN,
+    allPermission = PERMISSIONS.STATUSPAGE_EDIT_ALL
+) {
+    const statusPage = await R.findOne("status_page", " slug = ? ", [slug]);
+    if (!statusPage) {
+        throw new Error("slug is not found");
+    }
+    await requireActOn(socket, ownPermission, allPermission, statusPage.user_id);
+    return statusPage;
+}
 
 /**
  * Validates incident data
@@ -33,13 +60,7 @@ module.exports.statusPageSocketHandler = (socket) => {
     // Post or edit incident
     socket.on("postIncident", async (slug, incident, callback) => {
         try {
-            checkLogin(socket);
-
-            let statusPageID = await StatusPage.slugToID(slug);
-
-            if (!statusPageID) {
-                throw new Error("slug is not found");
-            }
+            const statusPageID = (await getEditableStatusPage(socket, slug)).id;
 
             let incidentBean;
 
@@ -83,9 +104,7 @@ module.exports.statusPageSocketHandler = (socket) => {
 
     socket.on("unpinIncident", async (slug, callback) => {
         try {
-            checkLogin(socket);
-
-            let statusPageID = await StatusPage.slugToID(slug);
+            const statusPageID = (await getEditableStatusPage(socket, slug)).id;
 
             await R.exec("UPDATE incident SET pin = 0 WHERE pin = 1 AND status_page_id = ? ", [statusPageID]);
 
@@ -123,17 +142,7 @@ module.exports.statusPageSocketHandler = (socket) => {
 
     socket.on("editIncident", async (slug, incidentID, incident, callback) => {
         try {
-            checkLogin(socket);
-
-            let statusPageID = await StatusPage.slugToID(slug);
-            if (!statusPageID) {
-                callback({
-                    ok: false,
-                    msg: "slug is not found",
-                    msgi18n: true,
-                });
-                return;
-            }
+            const statusPageID = (await getEditableStatusPage(socket, slug)).id;
 
             let bean = await R.findOne("incident", " id = ? AND status_page_id = ? ", [incidentID, statusPageID]);
             if (!bean) {
@@ -186,17 +195,7 @@ module.exports.statusPageSocketHandler = (socket) => {
 
     socket.on("deleteIncident", async (slug, incidentID, callback) => {
         try {
-            checkLogin(socket);
-
-            let statusPageID = await StatusPage.slugToID(slug);
-            if (!statusPageID) {
-                callback({
-                    ok: false,
-                    msg: "slug is not found",
-                    msgi18n: true,
-                });
-                return;
-            }
+            const statusPageID = (await getEditableStatusPage(socket, slug)).id;
 
             let bean = await R.findOne("incident", " id = ? AND status_page_id = ? ", [incidentID, statusPageID]);
             if (!bean) {
@@ -226,17 +225,7 @@ module.exports.statusPageSocketHandler = (socket) => {
 
     socket.on("resolveIncident", async (slug, incidentID, callback) => {
         try {
-            checkLogin(socket);
-
-            let statusPageID = await StatusPage.slugToID(slug);
-            if (!statusPageID) {
-                callback({
-                    ok: false,
-                    msg: "slug is not found",
-                    msgi18n: true,
-                });
-                return;
-            }
+            const statusPageID = (await getEditableStatusPage(socket, slug)).id;
 
             let bean = await R.findOne("incident", " id = ? AND status_page_id = ? ", [incidentID, statusPageID]);
             if (!bean) {
@@ -267,13 +256,7 @@ module.exports.statusPageSocketHandler = (socket) => {
 
     socket.on("getStatusPage", async (slug, callback) => {
         try {
-            checkLogin(socket);
-
-            let statusPage = await R.findOne("status_page", " slug = ? ", [slug]);
-
-            if (!statusPage) {
-                throw new Error("No slug?");
-            }
+            const statusPage = await getEditableStatusPage(socket, slug);
 
             callback({
                 ok: true,
@@ -291,14 +274,8 @@ module.exports.statusPageSocketHandler = (socket) => {
     // imgDataUrl Only Accept PNG!
     socket.on("saveStatusPage", async (slug, config, imgDataUrl, publicGroupList, callback) => {
         try {
-            checkLogin(socket);
-
             // Save Config
-            let statusPage = await R.findOne("status_page", " slug = ? ", [slug]);
-
-            if (!statusPage) {
-                throw new Error("No slug?");
-            }
+            let statusPage = await getEditableStatusPage(socket, slug);
 
             checkSlug(config.slug);
 
@@ -435,7 +412,7 @@ module.exports.statusPageSocketHandler = (socket) => {
     // Add a new status page
     socket.on("addStatusPage", async (title, slug, callback) => {
         try {
-            checkLogin(socket);
+            const user = await requirePermission(socket, PERMISSIONS.STATUSPAGE_CREATE);
 
             title = title?.trim();
             slug = slug?.trim();
@@ -461,6 +438,8 @@ module.exports.statusPageSocketHandler = (socket) => {
             statusPage.theme = "auto";
             statusPage.icon = "";
             statusPage.autoRefreshInterval = 300;
+            // Record the creator so "edit own" can be enforced later.
+            statusPage.user_id = user.id;
             await R.store(statusPage);
 
             callback({
@@ -483,9 +462,14 @@ module.exports.statusPageSocketHandler = (socket) => {
         const server = UptimeKumaServer.getInstance();
 
         try {
-            checkLogin(socket);
-
-            let statusPageID = await StatusPage.slugToID(slug);
+            const statusPageID = (
+                await getEditableStatusPage(
+                    socket,
+                    slug,
+                    PERMISSIONS.STATUSPAGE_DELETE_OWN,
+                    PERMISSIONS.STATUSPAGE_DELETE_ALL
+                )
+            ).id;
 
             if (statusPageID) {
                 // Reset entry page if it is the default one.
