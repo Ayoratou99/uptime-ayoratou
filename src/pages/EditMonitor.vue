@@ -4073,6 +4073,11 @@ message HealthCheckResponse {
                             this.monitor.id = undefined; // Remove id when cloning as we want a new id
                             this.monitor.includeSensitiveData = undefined;
                             this.monitor.maintenance = undefined;
+                            // Attribution, resolved for display only. The clone
+                            // belongs to whoever is creating it, and the server
+                            // sets that itself.
+                            this.monitor.owner = undefined;
+                            this.monitor.userID = undefined;
                             // group monitor fields
                             this.monitor.childrenIDs = undefined;
                             this.monitor.forceInactive = undefined;

@@ -850,10 +850,23 @@ let needSetup = false;
                  * List of frontend-only properties that should not be saved to the database.
                  * Should clean up before saving to the database.
                  */
+                // Anything here is derived for display and is not a column on
+                // the monitor table. bean.import() below would try to write it
+                // and the insert would fail, which is how cloning broke: a
+                // clone posts back the JSON it was given, attribution included.
                 const frontendOnlyProperties = [
                     "humanReadableInterval",
                     "globalpingdnsresolvetypeoptions",
                     "responsecheck",
+                    "owner",
+                    "userID",
+                    "includeSensitiveData",
+                    "maintenance",
+                    "childrenIDs",
+                    "forceInactive",
+                    "path",
+                    "pathName",
+                    "screenshot",
                 ];
                 for (const prop of frontendOnlyProperties) {
                     if (prop in monitor) {
