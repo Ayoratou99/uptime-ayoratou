@@ -8,6 +8,30 @@ services:
       dockerfile: docker/dockerfile
       target: release
     restart: unless-stopped
+    # Pin the upstream resolvers rather than inheriting whatever the host is
+    # using. This removes one variable from "getaddrinfo EAI_AGAIN" failures,
+    # where a monitor reports down while the site is reachable from a browser.
+    #
+    # Be honest about how much this buys: repeated 60-lookup bursts from this
+    # container gave 4 failures before the change, 0 immediately after, and 4
+    # again on a later run. The run-to-run variance is larger than the effect,
+    # so treat this as tidying rather than a fix. Resolution of these domains
+    # from this network is genuinely slow and lossy, with individual lookups
+    # taking anywhere from 1ms to 40s.
+    #
+    # The reliable mitigation is on the monitors themselves: with Retries set
+    # to 0 a single dropped lookup marks a monitor down immediately. Two
+    # retries absorb it.
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    # Do not raise UV_THREADPOOL_SIZE here. Hostname resolution runs on
+    # libuv's threadpool and widening it lets every monitor resolve at once,
+    # which the resolver cannot take. A single burst of ten looked much faster
+    # (36.7s worst case down to 5.0s) and that reading was misleading:
+    # sustained load went from 4 failures in 60 lookups to 39. The default of
+    # 4 throttles resolution enough to keep it reliable, which matters more
+    # here than latency.
     volumes:
       - ./data:/app/data
     ports:
