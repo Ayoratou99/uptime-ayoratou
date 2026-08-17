@@ -29,7 +29,7 @@ jobs:
 
     steps:
       - run: git config --global core.autocrlf false # Mainly for Windows
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { persist-credentials: false }
 
       #    Tempoary disable until we understand TanStack npm supply-chain compromise
@@ -41,7 +41,7 @@ jobs:
       #          key: node-modules-${{ runner.os }}-node${{ matrix.node }}-${{ hashFiles('**/package-lock.json') }}
 
       - name: Use Node.js ${{ matrix.node }}
-        uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f # v6.1.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ matrix.node }}
 
@@ -75,16 +75,16 @@ jobs:
         # See supported Node.js release schedule at https://nodejs.org/en/about/releases/
 
     steps:
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { persist-credentials: false }
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
         with:
           platforms: linux/arm/v7
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@988b5a0280414f521da01fcc63a27aeeb4b104db # v3.6.1
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
       - name: Test on ARMv7 using Docker with QEMU
         run: |
@@ -101,7 +101,7 @@ jobs:
 
     steps:
       - run: git config --global core.autocrlf false # Mainly for Windows
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { persist-credentials: false }
 
       #    Tempoary disable until we understand TanStack npm supply-chain compromise
@@ -113,7 +113,7 @@ jobs:
       #          key: node-modules-${{ runner.os }}-node${{ matrix.node }}-${{ hashFiles('**/package-lock.json') }}
 
       - name: Use Node.js 20
-        uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f # v6.1.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 20
       - run: npm clean-install --no-fund
@@ -127,7 +127,7 @@ jobs:
       PLAYWRIGHT_VERSION: ~1.39.0
     steps:
       - run: git config --global core.autocrlf false # Mainly for Windows
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { persist-credentials: false }
 
       #    Tempoary disable until we understand TanStack npm supply-chain compromise
@@ -139,7 +139,7 @@ jobs:
       #          key: node-modules-${{ runner.os }}-node${{ matrix.node }}-${{ hashFiles('**/package-lock.json') }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f # v6.1.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
       - run: npm clean-install --no-fund
