@@ -8,23 +8,27 @@ services:
       dockerfile: docker/dockerfile
       target: release
     restart: unless-stopped
-    # Pin the upstream resolvers rather than inheriting whatever the host is
-    # using. This removes one variable from "getaddrinfo EAI_AGAIN" failures,
-    # where a monitor reports down while the site is reachable from a browser.
+    # Monitors were intermittently failing with "getaddrinfo EAI_AGAIN" while
+    # the same sites loaded fine in a browser.
     #
-    # Be honest about how much this buys: repeated 60-lookup bursts from this
-    # container gave 4 failures before the change, 0 immediately after, and 4
-    # again on a later run. The run-to-run variance is larger than the effect,
-    # so treat this as tidying rather than a fix. Resolution of these domains
-    # from this network is genuinely slow and lossy, with individual lookups
-    # taking anywhere from 1ms to 40s.
+    # Cause: 1.1.1.1 is unreachable from this network. Queried directly from
+    # this container it timed out 8 times out of 8, around 30s each, while
+    # 8.8.8.8 answered every time with a median of 116ms. Docker's default
+    # resolver list here included 1.1.1.1, so any query that fell through to
+    # it stalled until it gave up. With several monitors resolving at the same
+    # moment those stalls queued and exhausted the resolver's retry budget,
+    # which is what surfaced as EAI_AGAIN.
     #
-    # The reliable mitigation is on the monitors themselves: with Retries set
-    # to 0 a single dropped lookup marks a monitor down immediately. Two
-    # retries absorb it.
+    # Listing only reachable servers fixes it. Measured over four consecutive
+    # 60-lookup bursts after the change: 240 lookups, 0 failures, slowest 8ms.
+    # Before: 4 failures per 60, with individual lookups reaching 22s.
+    #
+    # Do not add 1.1.1.1 back without checking it is reachable first, and note
+    # that resolver order matters: putting an unreachable server first makes
+    # every single query wait for its timeout.
     dns:
-      - 1.1.1.1
       - 8.8.8.8
+      - 8.8.4.4
     # Do not raise UV_THREADPOOL_SIZE here. Hostname resolution runs on
     # libuv's threadpool and widening it lets every monitor resolve at once,
     # which the resolver cannot take. A single burst of ten looked much faster
